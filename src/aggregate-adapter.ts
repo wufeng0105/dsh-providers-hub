@@ -62,7 +62,7 @@ import {
   type ExpiryProbe,
   type RankedCandidate,
 } from './aggregate-core.js'
-import { CANONICAL_REASONING_EFFORTS, translateReasoningEffort } from './reasoning-ladder.js'
+import { CANONICAL_REASONING_EFFORTS, strongestDeclaredEffort, translateReasoningEffort } from './reasoning-ladder.js'
 import { registerAdapterIdempotent } from './llm-register-compat.js'
 // ⚠️ 目录落地的**广播**也只留一份实现（`catalog-broadcast.ts`）：12 家适配器都由
 //    `registerXxxLlm` 把 `broadcastCatalogChanged(ctx)` 注入成 `onCatalogLoaded`。
@@ -73,7 +73,7 @@ import { broadcastCatalogChanged } from './catalog-broadcast.js'
 // ⚠️ 冷启动（目录尚未读到）时 `resolveModel` 要回**保守展示名**，必须是**同一份**
 //    规范化实现（与 `aggregate-catalog.ts` 的 `buildVirtualModels` 同源）——
 //    自己写一遍会与目录里的名字漂移（同一个模型两套名字）。
-import { canonicalDisplayName } from './canonical-models.js'
+import { canonicalDisplayName, isUnifiedKey } from './canonical-models.js'
 // ⚠️ 「目录够不够新」只留**一份实现**（`model-catalog.ts` 的 `isCatalogFresh`）。
 //    本文件原先自己内联 `now - this.catalogAt < ttl`，与 9 个适配器里的同一判据
 //    构成「同一语义两套判据」（仓库红线，`docs/agent-notes/misc.md`）。
@@ -1971,7 +1971,10 @@ export class AggregateAdapter extends LlmAdapter {
       name: this.nameOf(virtual),
       inputModalities: ['text', 'image'],
       context: { contextWindow: await this.contextWindowFor(model, virtual.candidates, signal) },
-      reasoning: aggregateReasoningInfo(),
+      // ⚠️ 型号统一条目（2026-11-16）**不声明 reasoning** ⇒ 客户端不渲染档位选择器。
+      //    请求时由 `streamThrough` 按候选真实声明恒注入最强档（用户诉求：不挑档、顶格）。
+      //    非统一键照旧声明规范化并集（既有行为逐字节不变）。
+      ...(isUnifiedKey(model) ? {} : { reasoning: aggregateReasoningInfo() }),
     }
   }
 
@@ -2917,8 +2920,8 @@ export class AggregateAdapter extends LlmAdapter {
           //    由 `resolveQueueWaitMode()` 负责，与本标记无关。
           const hasNextCandidate = index + 1 < targets.length
           const stream = hasNextCandidate
-            ? bindAggregateDispatch(() => self.streamThrough(target, options))
-            : self.streamThrough(target, options)
+            ? bindAggregateDispatch(() => self.streamThrough(target, options, modelKey))
+            : self.streamThrough(target, options, modelKey)
           for await (const chunk of stream) {
             // ⚠️⚠️ **必须在置 `emitted` 之前**判这个失败帧（顺序是语义性的）。
             //
@@ -3164,8 +3167,20 @@ export class AggregateAdapter extends LlmAdapter {
   }
 
   /** 把请求转发给一个候选，按目标档位表翻译 `reasoningEffort`。 */
-  private streamThrough(target: DispatchTarget, options: GenerateOptions): AsyncIterable<StreamChunk> {
+  private streamThrough(target: DispatchTarget, options: GenerateOptions, modelKey: string): AsyncIterable<StreamChunk> {
     const base = { ...options, provider: target.provider, model: target.realId }
+    // ⚠️ 型号统一条目（2026-11-16）**恒顶格**：不暴露档位选择器 ⇒ 请求里的 reasoningEffort
+    //    无用户语义（多半是宿主带来的上一模型旧档位，见 dispatch 注释）⇒ 忽略它，
+    //    按候选**真实声明**注入最强非 off 档。候选无声明 ⇒ 不下发（走上游默认，不编造）。
+    if (isUnifiedKey(modelKey)) {
+      const top = strongestDeclaredEffort(target.efforts)
+      return this.ctx.llm.stream({
+        ...base,
+        reasoningEffort: top === undefined
+          ? undefined
+          : ReasoningEffortId(top) as GenerateOptions['reasoningEffort'],
+      })
+    }
     const requested = options.reasoningEffort
     if (requested === undefined) return this.ctx.llm.stream(base)
     const requestedEffort = String(requested)

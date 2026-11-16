@@ -180,3 +180,25 @@ export function canonicalReasoningEffortFor(effort: string): string | undefined 
   }
   return best?.canonical
 }
+
+/**
+ * 取候选**已声明**档位里最强的非 off 档（2026-11-16，型号统一条目恒顶格用）。
+ *
+ * 统一条目不暴露档位选择器，请求时按候选真实声明注入最强档：
+ * - 两档 `off/on` ⇒ `on`；多档 `low/high/max` ⇒ `max`；trae `light/high/extra_high` ⇒ `extra_high`。
+ * - 空表 / 全 off 族 / 全未登记 id ⇒ `undefined`（调用方据此**不下发**该字段，
+ *   走上游默认 —— 不编造一个候选没声明的档位，那会被上游 400 或静默错档）。
+ *
+ * ⚠️ 同 rank 取**先出现者**（稳定）：`on` 与 `high` 同序（rank 5），声明序在前者优先。
+ * ⚠️ 只读入参、不改它（与 `translateReasoningEffort` 同口径）。
+ */
+export function strongestDeclaredEffort(declared: readonly string[]): string | undefined {
+  let best: { effort: string; rank: number } | undefined
+  for (const effort of declared) {
+    const rank = reasoningRankOf(effort)
+    // 未登记的私有 id 不知道强度，不参与；off 族（rank 0）不是「顶格」目标。
+    if (rank === undefined || rank === 0) continue
+    if (best === undefined || rank > best.rank) best = { effort, rank }
+  }
+  return best?.effort
+}

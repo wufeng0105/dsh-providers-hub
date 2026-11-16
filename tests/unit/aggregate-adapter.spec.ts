@@ -545,13 +545,16 @@ describe('AggregateAdapter：resolveModel 必须按入参回填', () => {
     // IKJJ0V 修复，此前完全没声明 ⇒ 选择器永不出现）」）。DSH 的判定是
     // `resolved.reasoning === undefined ? undefined : {…}` ⇒ **不声明**等于
     // 「这个模型没有档位可选」，选择器根本不渲染。
+    // ⚠️ 2026-11-16：本守卫用**非统一键** kimi-k3 承载 —— 型号统一条目（如
+    //    deepseek-v4-1-flash）刻意不声明档位（恒顶格，见 aggregate-unified-effort.spec.ts），
+    //    而「非统一键必须声明档位」这条既有行为不变，故迁到 kimi-k3 上继续守。
     const adapter = new AggregateAdapter(makeCtx({
-      buddy: [{ id: 'deepseek-v4.1-flash', name: 'Deepseek-V4.1-Flash' }],
+      buddy: [{ id: 'kimi-k3', name: 'Kimi-K3' }],
     }), { accountPool: makePool() })
     // ⚠️ 目录必须先落地：冷帧（`this.catalog` 为空）时刻意**不声明**档位
     //    （见 `coldModelInfo`：编一份档位等于替用户承诺可能不存在的档位）。
     await warmCatalog(adapter)
-    const info = await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const info = await adapter.resolveModel(AGGREGATE_PROVIDER, 'kimi-k3')
     expect(info.reasoning).toBeDefined()
     expect(info.reasoning!.efforts.length).toBeGreaterThan(0)
     // ⚠️ 锁**具体值**（不是只 `toBeDefined()`）：默认档定为 `high`，与各渠道自己的
@@ -565,13 +568,14 @@ describe('AggregateAdapter：resolveModel 必须按入参回填', () => {
   it('档位是**并集**（规范化名）而非候选集交集，且不含渠道私有档', async () => {
     // ⚠️ 各渠道档位命名空间几乎不相交（codearts 只有 on/off、buddy 是 low/high/max、
     // trae 是 light/extra_high）⇒ 取交集必为空 ⇒ 空选择器。故必须声明并集。
+    // ⚠️ 2026-11-16：用非统一键 kimi-k3 承载（统一条目不声明档位，见上一条注释）。
     const adapter = new AggregateAdapter(makeCtx({
       // 只给一个 codearts 候选（它的档位只有 on/off）—— 若实现成「交集」，
       // 这里就会得到 on/off 两个渠道私有档，而不是规范化并集。
-      codearts: [{ id: 'deepseek-v4.1-flash', name: 'deepseek-v4.1-flash' }],
+      codearts: [{ id: 'kimi-k3', name: 'kimi-k3' }],
     }), { accountPool: makePool() })
     await warmCatalog(adapter)
-    const info = await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const info = await adapter.resolveModel(AGGREGATE_PROVIDER, 'kimi-k3')
     const ids = info.reasoning!.efforts.map((effort) => String(effort.id))
     // 规范化并集应含 medium / high 这类规范名，且**不含** on/off 这类渠道私有档。
     expect(ids).toContain('medium')
@@ -582,11 +586,12 @@ describe('AggregateAdapter：resolveModel 必须按入参回填', () => {
 
   it('档位展示名必须是官方中文（客户端直接渲染 name、不本地化）', async () => {
     // ⚠️ 权威来源是 Qoder IDE 的 i18n 词条（`qoder-product.ts` 有逐字记录）。
+    // ⚠️ 2026-11-16：用非统一键 kimi-k3 承载（统一条目不声明档位）。
     const adapter = new AggregateAdapter(makeCtx({
-      codearts: [{ id: 'deepseek-v4.1-flash', name: 'deepseek-v4.1-flash' }],
+      codearts: [{ id: 'kimi-k3', name: 'kimi-k3' }],
     }), { accountPool: makePool() })
     await warmCatalog(adapter)
-    const info = await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const info = await adapter.resolveModel(AGGREGATE_PROVIDER, 'kimi-k3')
     const efforts = info.reasoning!.efforts
     const nameOf = (id: string): string | undefined =>
       efforts.find((effort) => String(effort.id) === id)?.name
@@ -868,15 +873,17 @@ describe('prepareCall：真实链路 prepareCall → call.stream', () => {
     // ⚠️ 请求里的 `reasoningEffort` 来自**上一次对话**，可能带着别的模型族的档位名
     // ⇒ 原样转发会被 DSH 按 id 严格校验拦下 `UNSUPPORTED_REASONING_EFFORT`。
     // 这条用例锁的是**三种翻译结果各自对应哪条下发路径**（断言能区分路径）。
+    // ⚠️ 2026-11-16：用**非统一键** kimi-k3 承载 —— 统一条目恒顶格、不走逐候选翻译
+    //    （见 aggregate-unified-effort.spec.ts）；非统一键的翻译行为不变，故迁到 kimi-k3。
     const seen: Array<{ provider: string; effort: string | undefined }> = []
     const ctx = {
       logger: { warn: () => {}, info: () => {}, error: () => {} },
       llm: {
         listModels: async (provider: string) => (provider === 'buddy'
           // buddy 用私有档位名 `low`（请求值 `medium` 应就近落到它）
-          ? [{ id: 'deepseek-v4.1-flash', name: 'Deepseek-V4.1-Flash' }]
+          ? [{ id: 'kimi-k3', name: 'Kimi-K3' }]
           // codearts 只有 on/off 开关，没有强度阶梯（`medium` 不可表达）
-          : [{ id: 'deepseek-v4.1-flash', name: 'deepseek-v4.1-flash' }]),
+          : [{ id: 'kimi-k3', name: 'kimi-k3' }]),
         listProviders: () => [{ id: 'buddy', name: 'b' }, { id: 'codearts', name: 'c' }],
         resolveModelInfo: async (provider: string) => (provider === 'buddy'
           ? { reasoning: { efforts: [{ id: 'low' }, { id: 'high' }] } }
@@ -893,7 +900,7 @@ describe('prepareCall：真实链路 prepareCall → call.stream', () => {
     })
 
     // ① mapped：`minimal`(rank 1) 不在 buddy 的 [low(3), high(5)] 里 → 就近落到 `low`。
-    const mapped = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const mapped = await adapter.prepareCall(AGGREGATE_PROVIDER, 'kimi-k3')
     for await (const _ of mapped.stream({
       messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
       reasoningEffort: 'minimal',
@@ -927,8 +934,8 @@ describe('prepareCall：真实链路 prepareCall → call.stream', () => {
       logger: { warn: () => {}, info: () => {}, error: () => {} },
       llm: {
         listModels: async (provider: string) => (provider === 'buddy'
-          ? [{ id: 'deepseek-v4.1-flash', name: 'Deepseek-V4.1-Flash' }]
-          : [{ id: 'deepseek-v4.1-flash', name: 'deepseek-v4.1-flash' }]),
+          ? [{ id: 'kimi-k3', name: 'Kimi-K3' }]
+          : [{ id: 'kimi-k3', name: 'kimi-k3' }]),
         listProviders: () => [{ id: 'buddy', name: 'b' }, { id: 'codearts', name: 'c' }],
         resolveModelInfo: async (provider: string) => (provider === 'buddy'
           ? { reasoning: { efforts: [{ id: 'low' }, { id: 'high' }] } }
@@ -947,7 +954,7 @@ describe('prepareCall：真实链路 prepareCall → call.stream', () => {
       expiryProbe: async (provider) => (provider === 'buddy' ? 100 : 900),
     })
     seen.length = 0
-    const call = await fallback.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await fallback.prepareCall(AGGREGATE_PROVIDER, 'kimi-k3')
     for await (const _ of call.stream({
       messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
       reasoningEffort: 'none',

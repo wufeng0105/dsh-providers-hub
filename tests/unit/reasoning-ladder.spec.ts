@@ -5,6 +5,7 @@ import {
   isKnownReasoningEffort,
   isThinkingOffEffort,
   reasoningRankOf,
+  strongestDeclaredEffort,
   translateReasoningEffort,
 } from '../../src/reasoning-ladder.js'
 
@@ -155,5 +156,27 @@ describe('canonicalReasoningEffortFor：该填哪几个', () => {
         expect(back, `${name}：${canonical} 应译回 ${id}`).toMatchObject({ effort: id })
       }
     }
+  })
+})
+
+describe('strongestDeclaredEffort：统一条目恒顶格注入（2026-11-16）', () => {
+  it.each([
+    [['off', 'on'], 'on'],                       // 两档开关 ⇒ 开
+    [['low', 'high', 'max'], 'max'],             // 多档 ⇒ 最强
+    [['light', 'high', 'extra_high'], 'extra_high'], // trae 私有名
+    [['none'], undefined],                       // 全 off ⇒ 不注入
+    [[], undefined],                             // 空表 ⇒ 不注入（不编造）
+    [['bogus'], undefined],                      // 未登记 id ⇒ 不编造
+    [['on', 'high'], 'on'],                      // 同 rank 取先出现者（稳定）
+    [['off', 'none', 'low'], 'low'],             // 跳过 off 族取最强非 off
+  ])('%j ⇒ %s', (declared, expected) => {
+    expect(strongestDeclaredEffort(declared)).toBe(expected)
+  })
+
+  it('不改入参数组', () => {
+    const declared = ['low', 'high', 'max']
+    const frozen = Object.freeze([...declared])
+    expect(() => strongestDeclaredEffort(frozen)).not.toThrow()
+    expect(declared).toEqual(['low', 'high', 'max'])
   })
 })
