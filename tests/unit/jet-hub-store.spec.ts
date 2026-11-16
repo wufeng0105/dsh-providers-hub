@@ -226,6 +226,7 @@ describe('老契约后端（SettingsStore）', () => {
       providerOrder: [],
       // 关闭意图缺省空表（没有任何供应商被关闭）：读回同值（Gitee IKP8OF）。
       providerClosed: {},
+      hiddenProviders: [],
     })
     // ⚠️ 锁定表**不进**这份文档：它是同机多 profile 共享的，旧版本代码全量重写
     // 时不会携带自己不认识的键 —— 表放这儿会被静默抹掉（详见
@@ -399,6 +400,7 @@ describe('文件后端（FileStore）', () => {
       providerOrder: [],
       // 关闭意图缺省空表（没有任何供应商被关闭）：读回同值（Gitee IKP8OF）。
       providerClosed: {},
+      hiddenProviders: [],
     })
     // 落盘文本里也不该出现锁定表（它属于 permanent-locks.json）
     expect(readFileSync(statePath, 'utf-8')).not.toContain('permanentLocks')
@@ -925,6 +927,7 @@ describe('文件后端（FileStore）', () => {
       providerOrder: [],
       // 关闭意图缺省空表（没有任何供应商被关闭）：读回同值（Gitee IKP8OF）。
       providerClosed: {},
+      hiddenProviders: [],
     })
   })
 })

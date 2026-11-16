@@ -74,6 +74,9 @@ import { broadcastCatalogChanged } from './catalog-broadcast.js'
 //    规范化实现（与 `aggregate-catalog.ts` 的 `buildVirtualModels` 同源）——
 //    自己写一遍会与目录里的名字漂移（同一个模型两套名字）。
 import { canonicalDisplayName, isUnifiedKey } from './canonical-models.js'
+// ⚠️ 聚合必须绕过「选择器隐藏」层读目录（否则隐藏一个渠道 = 聚合也失去它的候选，
+//    那就成了「关闭」而不是「隐藏」）。
+import { rawListModelsFor } from './selector-visibility.js'
 // ⚠️ 「目录够不够新」只留**一份实现**（`model-catalog.ts` 的 `isCatalogFresh`）。
 //    本文件原先自己内联 `now - this.catalogAt < ttl`，与 9 个适配器里的同一判据
 //    构成「同一语义两套判据」（仓库红线，`docs/agent-notes/misc.md`）。
@@ -1057,7 +1060,14 @@ export class AggregateAdapter extends LlmAdapter {
         // ⚠️ `LlmRuntime.listModels(provider)` 只接受一个参数、**没有 signal 通道**
         //   （`dsh-llm/lib/index.js:1471`），故无法把 signal 透传下去；中止靠
         //    下面 catch 里的 `isAbortLike` 与循环开头的 `throwIfAborted` 兜住。
-        catalogs[provider] = await this.ctx.llm.listModels(provider)
+        // ⚠️ **优先读「未套选择器隐藏层」的原始 `listModels`**（2026-11-16 用户诉求
+        //    「隐藏已聚合的分组」）：宿主侧那份被 `selector-visibility` 包装过，
+        //    隐藏的渠道会对它返回 `[]` —— 而聚合**必须**仍能拿到那些候选，
+        //    否则「隐藏」就变成了「关闭」（聚合也掏空）。黑名单仍由原适配器内部过滤
+        //    ⇒ 成员口径（用户放开的那些）逐字不变。
+        //    ⚠️ 未登记的渠道（没有原始引用）退回 `ctx.llm.listModels` —— 与改前等价。
+        const raw = rawListModelsFor(provider)
+        catalogs[provider] = await (raw === undefined ? this.ctx.llm.listModels(provider) : raw(provider))
       } catch (error) {
         // ⚠️ **中止不得被吞成 warn**（本函数此前正是这样：把「用户取消」记成
         //    「读目录失败」并继续，且把截断结果缓存 60 秒）。
@@ -1849,26 +1859,13 @@ export class AggregateAdapter extends LlmAdapter {
    * **不得**用于 `resolveModel` / `describeCatalog` —— 见 {@link nameOf} 的注释。
    */
   private pickerNameOf(model: VirtualModel): string {
-    // ⚠️ 降级集合**算一次**（`rejectedFor` 含 D4 的 id 漂移降级，逐候选重算纯属浪费）。
-    const rejected = this.rejectedFor(model)
-    const prices = model.candidates
-      // ⚠️ 只取**当前参与轮换**的候选（`gateOf(...) === 'allowed'`）—— 判据已从
-      //    「已接入折算」升级为完整三态（用户 2026-10-15）：未接入渠道的候选**未手工打开时**
-      //    永远不会被路由到，把它的价格显示出来等于替一个用不上的候选报价；而**手工打开的**
-      //    未接入候选**真的会参与**（赋 `NEVER`），它的价格该算进去。
-      //
-      // ⚠️ 若这里保留「已接入」判据：用户手工打开一个更便宜的未接入候选后，选择器里的
-      //    「· 最低 x0.03」会**说谎** —— 正是本方法头警告的那类误导。
-      //
-      // ⚠️ `gateOf` 是同步、零网络的（只读注入的三张表）⇒ 本方法「同步 + 零网络」的
-      //    契约不变（`listModels` / `listAllModels` 的渲染路径不能打网络）。
-      .filter((candidate) => this.gateOf(model.key, candidate.provider, candidate.realId, rejected) === 'allowed')
-      .map((candidate) => candidate.price)
-      .filter((price) => Number.isFinite(price))
-    if (prices.length === 0) return model.name
-    const best = Math.min(...prices)
-    // ⚠️ 「最低」二字不可省：见方法头那段实测 —— 省掉会让用户以为本次就用这个价。
-    return `${model.name} · 最低 ${best === 0 ? '免费' : `x${best}`}`
+    // ⚠️⚠️ **不再拼接「· 最低 x0.045」**（用户 2026-11-16 明确要求去掉）：
+    //    「它有一个这个什么说明什么最低 x0.045 这些东西，这些都不需要我」。
+    //    ⇒ 选择器里只显示规范型号名（`DeepSeek Flash`），倍率仍可在**聚合面板**的
+    //      候选子列表里逐条看到（那里才是核查价格的正确位置）。
+    //    ⚠️ 这是**有意推翻**既有设计（原注释长篇论证「最低」二字不可省）——
+    //      用户已经把倍率当作噪音，不是信息。要恢复只需把下面几行接回。
+    return model.name
   }
 
   /**

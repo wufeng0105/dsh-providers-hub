@@ -566,6 +566,16 @@ export interface JetHubState {
    * 缺键语义 = **没有任何供应商被关闭**，与升级前行为一致。
    */
   providerClosed?: ProviderClosedMap
+  /**
+   * 「从模型选择器隐藏」的 provider 集合（2026-11-16 用户诉求）。
+   *
+   * ⚠️ 与 `providerClosed` 是**两件事**：`providerClosed` 会把目录灌进黑名单
+   * （聚合也拿不到）；本键只让该 provider 的 `listModels()` 对**宿主**返回 `[]`
+   * （聚合仍通过原适配器读目录）⇒ 用户说的「隐藏而不是关闭」。
+   *
+   * 缺键 = 全部显示（与升级前一致）；丢失后果可逆（再勾一次）。
+   */
+  hiddenProviders?: string[]
 }
 
 /**
@@ -964,6 +974,26 @@ export function sanitizeProviderClosed(raw: unknown): ProviderClosedMap {
   const result: ProviderClosedMap = {}
   for (const [provider, flag] of Object.entries(raw as Record<string, unknown>)) {
     if (flag === true) result[provider] = true
+  }
+  return result
+}
+
+/**
+ * 归一化「从选择器隐藏」的 provider 集合（2026-11-16）。
+ *
+ * 只接受**非空字符串**（`trim()` 后非空），去重、保序；畸形输入退化为空数组
+ * （空数组 = 全部显示，与升级前行为一致）。不做任何「猜测性」修复 —— 脏值直接丢。
+ */
+export function sanitizeHiddenProviders(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const item of raw) {
+    if (typeof item !== 'string') continue
+    const provider = item.trim()
+    if (provider.length === 0 || seen.has(provider)) continue
+    seen.add(provider)
+    result.push(provider)
   }
   return result
 }
@@ -1418,6 +1448,7 @@ class SettingsStore implements JetHubStore {
         providerOrder?: unknown
         minimaxXff?: unknown
         providerClosed?: unknown
+        hiddenProviders?: unknown
       }
       | undefined
     if (value === undefined || value === null) return undefined
@@ -1452,6 +1483,8 @@ class SettingsStore implements JetHubStore {
       minimaxXff: sanitizeMinimaxXff(value.minimaxXff),
       // 老文档没这个键 → 空表（没有任何供应商被关闭），与升级前行为一致。
       providerClosed: sanitizeProviderClosed(value.providerClosed),
+      // 老文档没这个键 → 空数组（全部显示，与升级前一致）。
+      hiddenProviders: sanitizeHiddenProviders(value.hiddenProviders),
     }
   }
 
@@ -1526,6 +1559,9 @@ class SettingsStore implements JetHubStore {
       //    （Gitee issue IKP8OF 原样复发，且用户无从察觉自己「又打开过」它）。
       //    缺键 / 脏值一律写 `{}`，不会写出 `undefined` 空洞。
       providerClosed: sanitizeProviderClosed(state.providerClosed),
+      // ⚠️ 与上面同因（`replace` 整体替换）：漏键会让「选择器隐藏」在**任何**一次
+      //    其它写入后静默恢复成「全部显示」。
+      hiddenProviders: sanitizeHiddenProviders(state.hiddenProviders),
     })
   }
 }
@@ -1873,6 +1909,7 @@ class FileStore implements JetHubStore {
         providerOrder?: unknown
         minimaxXff?: unknown
         providerClosed?: unknown
+        hiddenProviders?: unknown
       }
       return {
         accounts: sanitizeAccounts(value.accounts),
@@ -1905,6 +1942,7 @@ class FileStore implements JetHubStore {
         minimaxXff: sanitizeMinimaxXff(value.minimaxXff),
         // 老文档没这个键 → 空表（没有任何供应商被关闭），与升级前行为一致。
         providerClosed: sanitizeProviderClosed(value.providerClosed),
+        hiddenProviders: sanitizeHiddenProviders(value.hiddenProviders),
       }
     } catch (error) {
       // ⚠️⚠️ **不能吞成 `undefined`**（2026-11-05 三审 P0-1）：`undefined` 与
@@ -2010,6 +2048,7 @@ class FileStore implements JetHubStore {
         minimaxXff: undefined,
         // 凭据文件里也没有关闭意图 → 空表（与全新安装一致）。
         providerClosed: {},
+        hiddenProviders: [],
       }
       try {
         this.write(state)

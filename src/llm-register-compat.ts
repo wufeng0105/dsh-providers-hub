@@ -74,6 +74,7 @@
 import { withDeadModelPruning } from './dead-model-store.js'
 import { withAnalyzeImageScoping } from './codearts-vision.js'
 import { withStrongestReasoningDefault } from './reasoning-default.js'
+import { rememberRawListModels, withSelectorVisibility } from './selector-visibility.js'
 
 /** dsh-llm 对「configurable provider 已存在」抛的 code。**当前仅作防御**保留。 */
 const DUPLICATE_DIRECTORY = 'DUPLICATE_DIRECTORY'
@@ -435,6 +436,13 @@ export function registerAdapterIdempotent(
   //    剔除 Proxy 调用 prepareCall 时 this 绑到它包着的记账 Proxy，
   //    于是 this.stream 命中记账陷阱；反过来则 this 落到裸适配器、记账被绕过。
   let target = wrapAdapterWithTokenLedger(providers, adapter as object)
+  // ⚠️ **先记下原始 `listModels`**（在任何包装之前）：聚合要靠它绕过「选择器隐藏」层，
+  //    读回**未隐藏**的目录（黑名单仍由原适配器内部过滤 ⇒ 成员口径不变）。
+  try {
+    if (typeof adapter === 'object' && adapter !== null) rememberRawListModels(providers, adapter)
+  } catch (error) {
+    warn?.(`[llm-register] 记录原始目录读取失败，聚合将退回 ctx.llm.listModels: ${String(error)}`)
+  }
   if (typeof adapter === 'object' && adapter !== null) {
     /**
      * **思考档位默认取最强**（2026-11-11 用户功能，见 `reasoning-default.ts`）。
@@ -472,6 +480,14 @@ export function registerAdapterIdempotent(
     } catch (error) {
       warn?.(`[llm-register] 已失效模型剔除包装失败，使用原适配器: ${String(error)}`)
     }
+  }
+  // ⚠️ **最外层：选择器可见性**（2026-11-16 用户诉求「隐藏已聚合的分组」）。
+  //    放最外层是因为它只拦**宿主那一次** `listModels`；内层拿到的仍是同一次调用，
+  //    于是隐藏对 `resolveModel` / `prepareCall` / `stream` 零影响（只藏分组，不关渠道）。
+  try {
+    target = withSelectorVisibility(providers, target as object)
+  } catch (error) {
+    warn?.(`[llm-register] 选择器可见性包装失败，使用原适配器: ${String(error)}`)
   }
   try {
     return llm.registerAdapter(providers, target)

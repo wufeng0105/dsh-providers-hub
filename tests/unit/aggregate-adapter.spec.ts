@@ -364,17 +364,26 @@ describe('AggregateAdapter：目录播报', () => {
    * 根因：`nameOf` 只回规范名，而倍率其实早就算好了（`CandidateEntry.price`），
    * 只是从没被展示层用过 ⇒ 用户在聚合下看不到价格，无法判断「挑的是不是便宜的」。
    */
-  it('★ 选择器名带倍率后缀（取最便宜的候选）', async () => {
+  /**
+   * ⚠️⚠️ **2026-11-16 语义反转**（用户明确要求）：选择器名**不再带倍率后缀**。
+   *
+   * 用户原话：「它有一个这个什么说明什么最低 x0.045 这些东西，这些都不需要我」。
+   * ⇒ 本组用例原断言 `DeepSeek Flash · 最低 x0.15`，现反转为**不得出现**这些后缀。
+   * 倍率仍在**聚合面板**的候选子列表里逐条可见（那里才是核查价格的地方）。
+   */
+  it('★ 选择器名不得带倍率后缀（用户 2026-11-16 要求去掉）', async () => {
     const adapter = new AggregateAdapter(makeCtx({
       buddy: [{ id: 'deepseek-v4.1-flash', name: 'Deepseek-V4.1-Flash · x0.15' }],
     }), { accountPool: makePool() })
     await warmCatalog(adapter)
     const models = await adapter.listModels(AGGREGATE_PROVIDER)
     const entry = models.find((m) => m.id === 'deepseek-flash')
-    expect(entry!.name).toBe('DeepSeek Flash · 最低 x0.15')
+    expect(entry!.name).toBe('DeepSeek Flash')
+    expect(entry!.name).not.toContain('最低')
+    expect(entry!.name).not.toContain('x0')
   })
 
-  it('★ 多个候选时取**最便宜**的那个倍率（轮换的第二判据就是倍率升序）', async () => {
+  it('★ 多候选时同样不带任何倍率（含最便宜的那个也不显示）', async () => {
     const adapter = new AggregateAdapter(makeCtx({
       buddy: [{ id: 'deepseek-v4.1-flash', name: 'Deepseek-V4.1-Flash · x0.29' }],
       codearts: [{ id: 'deepseek-v4.1-flash', name: 'Deepseek-V4.1-Flash · x0.03' }],
@@ -382,11 +391,10 @@ describe('AggregateAdapter：目录播报', () => {
     await warmCatalog(adapter)
     const models = await adapter.listModels(AGGREGATE_PROVIDER)
     const entry = models.find((m) => m.id === 'deepseek-flash')
-    // 最便宜的是 codearts 的 x0.03 —— 那才是最可能被路由到的那个价。
-    expect(entry!.name).toBe('DeepSeek Flash · 最低 x0.03')
+    expect(entry!.name).toBe('DeepSeek Flash')
   })
 
-  it('★ 全部候选都无倍率标注 ⇒ 不加后缀（不得渲染出 xInfinity）', async () => {
+  it('★ 全部候选都无倍率标注 ⇒ 同样只是规范名（不得渲染出 xInfinity）', async () => {
     const adapter = new AggregateAdapter(makeCtx({
       buddy: [{ id: 'deepseek-v4.1-flash', name: 'Deepseek-V4.1-Flash' }],
     }), { accountPool: makePool() })
@@ -397,32 +405,20 @@ describe('AggregateAdapter：目录播报', () => {
     expect(entry!.name).not.toContain('Infinity')
   })
 
-  it('★ 倍率为 0 显示「免费」（本仓库既有口径）', async () => {
-    // ⚠️ 必须用一个**已接入临期折算**的渠道（buddy）：未接入的候选会被
-    //    `pickerNameOf` 的价格过滤剔掉（见下一条用例），拿不到「免费」。
+  it('★ 免费候选也不加「免费」后缀（后缀整体下线，不是只去掉数字）', async () => {
     const adapter = new AggregateAdapter(makeCtx({
       buddy: [{ id: 'deepseek-v4.1-flash', name: 'Deepseek-V4.1-Flash · 免费' }],
     }), { accountPool: makePool() })
     await warmCatalog(adapter)
     const models = await adapter.listModels(AGGREGATE_PROVIDER)
     const entry = models.find((m) => m.id === 'deepseek-flash')
-    expect(entry!.name).toBe('DeepSeek Flash · 最低 免费')
+    expect(entry!.name).toBe('DeepSeek Flash')
+    expect(entry!.name).not.toContain('免费')
   })
 
-  it('★★ 跨临期档：显示的倍率不得声称「本次就用这个价」（真实缺陷，复审实测）', async () => {
-    // ⚠️ 这条是本组唯一覆盖**跨临期档**的用例，而缺陷恰恰只在跨档时出现
-    //    （其余用例的候选都在同一档，故取全局最小 === 取该档最小，二者无差别
-    //    ⇒ 对缺陷免疫，属覆盖缺口而非假用例）。
-    //
-    // 缺陷机制：`rankCandidates` 的第一判据是**临期升序**，倍率只在**同档内**才
-    // 起作用。初版 `pickerNameOf` 取全局最小 price 并直接拼 `· x0.03`，于是：
-    //   候选 buddy x0.29（临期最早）/ codearts x0.03（临期晚）
-    //   ⇒ 选择器显示 x0.03，实际发往 buddy（x0.29）。
-    // 用户据此以为「聚合会挑便宜的」，而实际挑的是最贵的 —— 与原报障的诉求相反。
-    //
-    // 修法是**如实表达下界**：`最低 x…` 只声称「该虚拟模型下最便宜的可路由候选」，
-    // 不声称本次会用它。（无法按「临期最早那档」取真实价：`CandidateEntry` 不含
-    // `expiry`，而本方法契约要求**同步**、不能在选择器渲染路径上打网络。）
+  it('★ 跨临期档也不显示价格（既然后缀整体下线，那条「下界」论证随之作废）', async () => {
+    // 原用例的顾虑是「显示全局最低价会让人以为本次就用它」。
+    // 现在不显示任何价格 ⇒ 误解面消失；价格核查移到面板子列表（逐条显示真实倍率）。
     const adapter = new AggregateAdapter(makeCtx({
       buddy: [{ id: 'deepseek-v4.1-flash', name: 'Deepseek-V4.1-Flash · x0.29' }],
       codearts: [{ id: 'deepseek-v4.1-flash', name: 'Deepseek-V4.1-Flash · x0.03' }],
@@ -431,9 +427,7 @@ describe('AggregateAdapter：目录播报', () => {
     const models = await adapter.listModels(AGGREGATE_PROVIDER)
     const entry = models.find((m) => m.id === 'deepseek-flash')
     expect(entry, '虚拟模型必须存在').toBeDefined()
-    // ⛔ 修前这里是 `· x0.03`（读起来像「本次就用 0.03」，而实际可能发往 x0.29）。
-    expect(entry!.name, '必须标明这是下界，不能声称本次就用它').toBe('DeepSeek Flash · 最低 x0.03')
-    expect(entry!.name, '「最低」二字不可省').toContain('最低')
+    expect(entry!.name).toBe('DeepSeek Flash')
   })
 
   it('★ 倍率只加在选择器路径上：resolveModel 仍是规范名（三处既有断言钉住）', async () => {    // ⚠️ `resolveModel` / `describeCatalog` 的名字被逐字钉住（本文件 :88、
@@ -447,17 +441,10 @@ describe('AggregateAdapter：目录播报', () => {
     expect(info.name).toBe('DeepSeek Flash')
   })
 
-  it('★ 未接入临期折算的候选不参与报价（它永远不会被路由到）', async () => {
-    // ⚠️ `cline` 在 `AGGREGATE_CHANNELS` 里，但**不在** `WIRED_EXPIRY_PROVIDERS` 里
-    //   （`expiryProbe` 对它返回 UNUSABLE ⇒ 永不路由）。把它的价格显示出来等于
-    //    替一个用不上的候选报价（规格 §9.2.1：只广告可路由的东西）。
-    //
-    // ⚠️ 必须同时给一个**已接入**的候选（buddy），否则整条虚拟模型会被
-    //    `refreshCatalog` 的模型层过滤掉（「至少有一个已接入候选」），
-    //    用例就变成在测「模型不存在」而不是在测价格过滤 —— 那是一条**恒真**的假用例
-    //   （第一版就是这么写错的：只用 cline，`entry` 直接是 undefined）。
-    //
-    // cline 报 x0.01（最便宜）：若过滤失效就会显示它。
+  it('★ 未接入临期折算的 candidate 的价格同样不出现在名字里', async () => {
+    // 原用例断言「cline 的 x0.01 不参与报价」（后缀里看不到它）。
+    // 后缀整体下线后，这条的可见判据变成「名字里没有任何价格」——
+    // 而「参与不参与轮换」仍由三态门控保证（那条有独立用例，不依赖本处）。
     const adapter = new AggregateAdapter(makeCtx({
       buddy: [{ id: 'deepseek-v4.1-flash', name: 'Deepseek-V4.1-Flash · x0.15' }],
       cline: [{ id: 'cline-free/deepseek-v4.1-flash', name: 'Deepseek-V4.1-Flash · x0.01' }],
@@ -465,9 +452,8 @@ describe('AggregateAdapter：目录播报', () => {
     await warmCatalog(adapter)
     const models = await adapter.listModels(AGGREGATE_PROVIDER)
     const entry = models.find((m) => m.id === 'deepseek-flash')
-    // 前置断言：模型确实在（否则下面那条断言会因 undefined 而**假通过**的变体）。
     expect(entry, '虚拟模型必须存在（buddy 是已接入候选）').toBeDefined()
-    expect(entry!.name).toBe('DeepSeek Flash · 最低 x0.15')
+    expect(entry!.name).toBe('DeepSeek Flash')
   })
 
   it('被用户关闭的虚拟模型不播报（套 disabledModelsFor 黑名单）', async () => {
@@ -1793,10 +1779,10 @@ describe('★ 未接入临期折算的渠道：模型**仍然可见**（用户 2
     const cline = entry!.candidates.find((c) => c.provider === 'cline')
     expect(cline!.state).toBe('allowed')
     expect(cline!.expiryWired, '客户端据此决定「关掉时写哪张表」').toBe(false)
-    // 手工打开后它的价格该算进「最低」—— 否则选择器会说谎（更便宜的候选被用上却没报）。
+    // 手工打开后它**参与轮换**（这条断言锁门控，与价格后缀无关）。
+    // ⚠️ 2026-11-16：选择器名不再带「最低 x…」后缀（用户要求），故这里只断言名字是规范名。
     const models = await adapter.listModels(AGGREGATE_PROVIDER)
-    expect(models.find((m) => m.id === 'deepseek-flash')!.name)
-      .toBe('DeepSeek Flash · 最低 x0.01')
+    expect(models.find((m) => m.id === 'deepseek-flash')!.name).toBe('DeepSeek Flash')
   })
 
   it('`auto` 始终在目录里（它不参与任何过滤，池跨全部渠道）', async () => {
@@ -4184,13 +4170,13 @@ describe('aggregate：目录加载不得同步折算余额（实测 7 秒）', (
     for (let i = 0; i < 10; i += 1) await Promise.resolve()
     await new Promise((resolve) => { setTimeout(resolve, 0) })
 
-    // 落地点 ①：再次 listModels 能看到折算出来的虚拟模型（含倍率后缀）。
+    // 落地点 ①：再次 listModels 能看到折算出来的虚拟模型。
     const second = await adapter.listModels(AGGREGATE_PROVIDER)
     expect(second.map((m) => m.id), '★ 后台补算完成后必须能被再次播报').toContain('deepseek-flash')
     expect(
       second.find((m) => m.id === 'deepseek-flash')?.name,
-      '★ 且是**折算过**的那一份（倍率来自真实目录）',
-    ).toBe('DeepSeek Flash · 最低 x0.15')
+      '★ 且是折算过的那一份（名字为规范名，倍率后缀已按用户要求下线）',
+    ).toBe('DeepSeek Flash')
 
     // 落地点 ②：同步视图（设置页开关清单的来源）也立刻可见。
     expect(adapter.listAllModels().map((m) => m.id)).toContain('deepseek-flash')

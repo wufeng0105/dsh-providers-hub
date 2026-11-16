@@ -1982,6 +1982,7 @@ col.dim-jh-ledgerColAccount { width: 12.68%; }
    （例如一条可压缩的提示条），它会静默失去弹性。 */
 .dim-jh-aggPanel > .dim-jh-aggIntro,
 .dim-jh-aggPanel > .dim-jh-aggToolbar,
+.dim-jh-aggPanel > .dim-jh-aggHide,
 .dim-jh-aggPanel > .dim-jh-aggNotice,
 .dim-jh-aggPanel > .dim-jh-aggEmpty,
 .dim-jh-aggPanel > .dim-jh-aggModel,
@@ -2013,6 +2014,13 @@ col.dim-jh-ledgerColAccount { width: 12.68%; }
      本处两个自造类**已删除**（零使用者的死样式是本仓库红线）。
    ⚠️ 唯一保留的自定义：工具行本身的 .dim-jh-aggToolbar（flex-wrap）与计数样式。 */
 .dim-jh-aggNotice { padding: 6px 10px; border-radius: 6px; font-size: 12px; color: var(--dsw-alias-label-error, #c0392b); background: var(--dsw-alias-bg-error, rgba(192, 57, 43, 0.08)); }
+/* 「隐藏已聚合的」（2026-11-16）：按钮 + 展开后的勾选列表。
+   勾选列表每行是 label（checkbox + 渠道名），点文字也能勾 —— 行高给足 28px
+   以满足触控目标，与全站其它开关行一致。 */
+.dim-jh-aggHide { display: flex; flex-direction: column; gap: 8px; }
+.dim-jh-aggHideList { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 8px; background: var(--dsw-alias-bg-secondary, rgba(0, 0, 0, 0.03)); }
+.dim-jh-aggHideHint { font-size: 12px; line-height: 1.7; color: var(--dsw-alias-label-tertiary); margin-bottom: 4px; }
+.dim-jh-aggHideRow { display: flex; align-items: center; gap: 8px; min-height: 28px; font-size: 13px; color: var(--dsw-alias-label-primary, #1a1a1a); cursor: pointer; }
 .dim-jh-aggEmpty { padding: 12px; font-size: 12px; line-height: 1.7; color: var(--dsw-alias-label-secondary); }
 /* ⚠️ 原先这里还有 .dim-jh-aggGroup / .dim-jh-aggGroupTitle（厂商分组标题），
    已按用户 2026-10-07 的要求删除 —— 渠道维度信息在**展开后的子列表**里逐条显示，

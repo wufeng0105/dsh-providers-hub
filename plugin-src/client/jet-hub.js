@@ -10153,6 +10153,18 @@ function AggregatePanel({ rpcCall }) {
    */
   const [orderMode, setOrderMode] = React.useState('expiry');
   /**
+   * 「从模型选择器隐藏」的渠道集合（2026-11-16 用户诉求）—— **权威在宿主**。
+   *
+   * ⚠️ 语义是「隐藏」不是「关闭」：被隐藏的渠道仍参与聚合轮换、账号与积分照常，
+   *    只是它在模型选择器里的**独立分组**不再出现（`selector-visibility.ts`）。
+   * ⚠️ 与 `provider.setEnabled`（关闭供应商）是**两条路**，别把按钮接到那边去。
+   */
+  const [hiddenProviders, setHiddenProviders] = React.useState([]);
+  /** 「隐藏已聚合的」列表的展开态。 */
+  const [hideListOpen, setHideListOpen] = React.useState(false);
+  /** 逐渠道隐藏的 in-flight 闸门（防连点）。 */
+  const [hideBusy, setHideBusy] = React.useState({});
+  /**
    * 拖动中**尚未落盘**的临时顺序（`canonicalId → 键数组`）。
    *
    * ⚠️ 拖动结果先落在这里、松手后统一提交一次：每次 `dragover` 都发 RPC 会在一次拖动里
@@ -10212,6 +10224,8 @@ function AggregatePanel({ rpcCall }) {
       setModels(models);
       // ⚠️ 排序模式的**权威在宿主**（响应里的 `orderMode`）。缺字段（老宿主）⇒ 临期序。
       setOrderMode(res?.orderMode === 'manual' ? 'manual' : 'expiry');
+      // ⚠️ 隐藏集合同样**以宿主为准**（缺字段 ⇒ 空数组 = 全部显示，老宿主行为）。
+      setHiddenProviders(Array.isArray(res?.hiddenProviders) ? res.hiddenProviders : []);
       // ⚠️⚠️ **必须把宿主返回的 `rejected` 回填进本地拒绝表**（真实缺陷，
       //    对抗审计探针实测证伪）：宿主在每个候选上返回 `rejected: boolean`
       //   （`src/aggregate-adapter.ts` 的 `describeCatalog`），而初版**从不读它** ——
@@ -10434,6 +10448,31 @@ function AggregatePanel({ rpcCall }) {
 
   /** 某模型当前生效的顺序数组（临时值优先，缺省用宿主下发的 `order`）。 */
   const orderOf = (model) => pendingOrder[model.canonicalId] ?? model.order ?? [];
+
+  /**
+   * 切换某渠道「从模型选择器隐藏」（2026-11-16 用户诉求）。
+   *
+   * ⚠️ 走 `aggregate.setHidden`，**不是** `provider.setEnabled`：后者会把该渠道的
+   *    模型灌进黑名单 ⇒ 聚合也失去这些候选（那就成了「关闭」而不是「隐藏」）。
+   * ⚠️ 以宿主返回的 `hiddenProviders` 为准回填本地（不本地先行取反：落盘失败时
+   *    面板会与宿主分叉，用户下次打开才发现变回去了）。
+   */
+  const onToggleHidden = React.useCallback(async (provider, hidden) => {
+    if (hideBusy[provider] === true) return;
+    setHideBusy((prev) => ({ ...prev, [provider]: true }));
+    try {
+      const res = await rpcCall('aggregate.setHidden', { provider, hidden });
+      setHiddenProviders(Array.isArray(res?.hiddenProviders) ? res.hiddenProviders : []);
+    } catch (caught) {
+      setNotice(`切换显示失败：${caught?.message ?? String(caught)}`);
+    } finally {
+      setHideBusy((prev) => {
+        const next = { ...prev };
+        delete next[provider];
+        return next;
+      });
+    }
+  }, [rpcCall, hideBusy]);
 
   /**
    * 把拖动结果落盘（**整体提交**，见 `pendingOrderFromRoster`）。
@@ -10744,6 +10783,25 @@ function AggregatePanel({ rpcCall }) {
   //    不需要再显示渠道了，因为渠道在每个模型的展开展示参与轮换的子列表中显示了」）
   //    ⇒ 模型平铺，全局按候选渠道数降序。厂商信息仍可在展开后的子列表里逐条看到。
   const sortedModels = sortModelsForPanel(models ?? []);
+  /**
+   * 「隐藏已聚合的」列表里的渠道 id —— **插件注册的全部渠道**（含聚合与 Jet Hub 自动）。
+   *
+   * ⚠️ 数据源必须用 `PROVIDERS`（本文件的渠道权威表），**不是**「聚合候选里出现的渠道」：
+   *    用户要藏的两类恰恰不一定有聚合候选 —— `jet-hub-auto`（Jet Hub 自动分组）
+   *    与 `aggregate` 自身都不出现在候选表里，但它们都在选择器里占一个分组。
+   *    用候选表当数据源会让用户找不到「Jet Hub 自动」那个勾选项（用户报障现象）。
+   * ⚠️ 聚合自身（`aggregate`）**不入列表**：它是用户要保留的那个分组，
+   *    服务器侧也拒绝隐藏它（`aggregate.setHidden` 的 bad-request 分支）。
+   */
+  const aggChannelIds = React.useMemo(() => {
+    const ids = PROVIDERS
+      .map(p => p.id)
+      .filter(id => id !== 'aggregate');
+    // ⚠️ `jet-hub-auto` 是插件注册的独立 provider（见 `src/auto-adapter.ts`），
+    //    它在选择器里显示为「Jet Hub 自动（临期优先）」分组。
+    if (ids.includes('jet-hub-auto') === false) ids.push('jet-hub-auto');
+    return ids.sort();
+  }, []);
   // 探测时间的人话（工具行显示「N 分钟前」，让用户知道看到的是多旧的数据）。
   const probedAgoText = lastProbeAt === null ? '' : (() => {
     const minutes = Math.floor((Date.now() - lastProbeAt) / 60_000);
@@ -10837,6 +10895,40 @@ function AggregatePanel({ rpcCall }) {
     //    恒定换行到按钮**下一行**（用户要求「应该显示在按钮下面」）。
     React.createElement('span', { className: 'dim-jh-aggCount' },
       models === null ? '读取中…' : `${models.length} 个聚合模型`)),
+  // ── 「隐藏已聚合的」（2026-11-16 用户诉求）──
+  // 用户原话：「这些厂商的模型我都已经聚合到了，我不想让它再单独列出来了；
+  // 点开按钮以后是个列表，我把它一勾选，它就不显示了」。
+  // ⚠️ 与「关闭供应商」是**两条路**：这里只让选择器不再显示该渠道的独立分组，
+  //    渠道本身照常参与聚合轮换（见 `selector-visibility.ts`）。
+  aggChannelIds.length > 0
+    ? React.createElement('div', { className: 'dim-jh-aggHide' },
+        React.createElement('button', {
+          type: 'button',
+          className: 'dim-jh-btn',
+          'data-kind': hideListOpen ? 'primary' : undefined,
+          'aria-expanded': String(hideListOpen),
+          title: '选择哪些渠道**不在模型选择器里单独列出**。'
+            + '被隐藏的渠道仍会参与聚合轮换（这不是关闭供应商，账号与积分照常）。',
+          onClick: () => { setHideListOpen(open => !open); },
+        }, `隐藏已聚合的（${hiddenProviders.length}/${aggChannelIds.length}）`),
+        hideListOpen
+          ? React.createElement('div', { className: 'dim-jh-aggHideList' },
+              React.createElement('div', { className: 'dim-jh-aggHideHint' },
+                '勾选 = 从模型选择器隐藏；取消勾选才会重新出现。'
+                + '被隐藏的渠道仍参与聚合轮换，这不是关闭供应商。'),
+              aggChannelIds.map(id => React.createElement('label', {
+                key: id,
+                className: 'dim-jh-aggHideRow',
+              },
+                React.createElement('input', {
+                  type: 'checkbox',
+                  checked: hiddenProviders.includes(id) === true,
+                  disabled: hideBusy[id] === true,
+                  onChange: event => { void onToggleHidden(id, event.target.checked); },
+                }),
+                React.createElement('span', null, providerLabel(id)))))
+          : null)
+    : null,
   notice !== null
     ? React.createElement('div', { className: 'dim-jh-aggNotice' }, notice)
     : null,

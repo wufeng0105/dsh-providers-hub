@@ -2,7 +2,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type { BuddyCredential } from './buddy.js'
 import type { BuddyProduct } from './product.js'
-import { createJetHubStore, clearRejectionLayer, DEFAULT_PANEL_ENTRY, isValidResetAtMs, MAX_DATE_MS, mergeLegacyLoomyLock, sanitizeAccounts, sanitizeAggregateAllowed, sanitizeAggregateOrder, sanitizeAggregateOrderMode, sanitizeAggregateRejections, sanitizeDisabledModels, sanitizeMinimaxXff, sanitizePanelEntry, sanitizePermanentLocks, sanitizePreferredRotation, sanitizeProviderClosed, sanitizeStrictManualOrder, withAllowed, withoutAllowed } from './jet-hub-store.js'
+import { createJetHubStore, clearRejectionLayer, DEFAULT_PANEL_ENTRY, isValidResetAtMs, MAX_DATE_MS, mergeLegacyLoomyLock, sanitizeAccounts, sanitizeAggregateAllowed, sanitizeAggregateOrder, sanitizeAggregateOrderMode, sanitizeAggregateRejections, sanitizeDisabledModels, sanitizeMinimaxXff, sanitizePanelEntry, sanitizePermanentLocks, sanitizePreferredRotation, sanitizeHiddenProviders, sanitizeProviderClosed, sanitizeStrictManualOrder, withAllowed, withoutAllowed } from './jet-hub-store.js'
 import type { AggregateAllowedMap, AggregateOrderMap, AggregateOrderMode, AggregateRejectionMap, JetHubStore, JetHubState, ModelDisableMap, PanelEntry, PermanentLockMap, PreferredRotationMap, ProviderClosedMap, StrictManualOrderMap } from './jet-hub-store.js'
 import { createPermanentLockStore } from './permanent-lock-store.js'
 import type { PermanentLockRead, PermanentLockStore } from './permanent-lock-store.js'
@@ -10,6 +10,8 @@ import { normalizeOpencodeGeneration } from './opencode-auth.js'
 import { maskProxyPassword } from './proxy-mask.js'
 import { qoderWebRefName } from './qoder-web-usage.js'
 import { qoderTrafficGuardEnabled, type QoderTrafficProvider } from './qoder-traffic-guard.js'
+// ⚠️ 选择器隐藏的**唯一判据**住在 `selector-visibility.ts`（包装层与 RPC 都读它）。
+import { setHiddenProviders } from './selector-visibility.js'
 // ⚠️ `model-queue.ts` **零 import**（纯函数模块，见其模块头）⇒ 不引入环。
 import { nextUtc8DayStartMs } from './model-queue.js'
 import { readTokenLedgerDayMap, utc8DayKey } from './token-ledger.js'
@@ -371,6 +373,14 @@ export class AccountPool {
    */
   private providerClosedCache: ProviderClosedMap = {}
   /**
+   * 「从模型选择器隐藏」的 provider 集合（2026-11-16 用户诉求）。
+   *
+   * ⚠️ 与 {@link providerClosedCache} **完全不同**：那个会连带把模型灌进黑名单
+   * （聚合也拿不到），本表只让该 provider 的 `listModels()` 对宿主返回 `[]`。
+   * 每次载入/写入都同步给 `selector-visibility.ts` 的单例（那是包装层读的地方）。
+   */
+  private hiddenProvidersCache: string[] = []
+  /**
    * 聚合「拒绝轮换」表的**权威进程内副本**（与 {@link cache} / {@link modelCache} 同理）。
    *
    * ⚠️ 与 {@link modelCache} **语义不同、不可合并**：黑名单是「关闭这个模型」（它从
@@ -623,6 +633,9 @@ export class AccountPool {
       // 供应商关闭意图同理：老文档没有该键 → 空表（没有任何供应商被关闭，
       // 与升级前行为一致）。**过一遍 sanitize**：老文档里可能有脏值。
       this.providerClosedCache = sanitizeProviderClosed(state.providerClosed)
+      // 选择器隐藏集合同理：老文档没有该键 → 空数组（全部显示）。
+      this.hiddenProvidersCache = sanitizeHiddenProviders(state.hiddenProviders)
+      setHiddenProviders(this.hiddenProvidersCache)
       // 严格手动顺序同理：老文档没有该键 → 空表（= 全部走余额分档，与升级前一致）。
       // 过一遍 sanitize：老契约后端可能绕过 schema 直接给出原始文档。
       this.strictManualOrderCache = sanitizeStrictManualOrder(state.strictManualOrder)
@@ -749,6 +762,8 @@ export class AccountPool {
         //    漏键 ⇒ 关闭意图**永不落盘**，且任何账号/黑名单写入都会把它抹掉
         //    ⇒ 重启后供应商静默回到「已打开」（Gitee issue IKP8OF 原样复发）。
         providerClosed: this.providerClosedCache,
+        // ⚠️ 同因（`replace` 整体替换）：漏键 ⇒ 隐藏集合在任何一次其它写入后被抹掉。
+        hiddenProviders: this.hiddenProvidersCache,
       })
       this.qoderTrafficGuard = qoderTrafficGuard
     })
@@ -862,6 +877,47 @@ export class AccountPool {
   providerClosedFor(provider: string): boolean {
     this.ensureLoaded()
     return this.providerClosedCache[provider] === true
+  }
+
+  /**
+   * 「从模型选择器隐藏」的 provider 集合只读快照（2026-11-16 用户诉求）。
+   *
+   * ⚠️ 与 {@link providerClosedFor} 的差别：本集合**不关渠道**，只让该 provider
+   * 的 `listModels()` 对宿主返回 `[]` ⇒ 分组不在选择器里出现，而聚合仍能拿它做候选。
+   */
+  listHiddenProviders(): string[] {
+    this.ensureLoaded()
+    return [...this.hiddenProvidersCache]
+  }
+
+  /** 是否从选择器隐藏（同步、零 IO；包装层每次 `listModels` 都问）。 */
+  isProviderHidden(provider: string): boolean {
+    this.ensureLoaded()
+    return this.hiddenProvidersCache.includes(provider)
+  }
+
+  /**
+   * 设置/清除某 provider 的「选择器隐藏」意图。
+   *
+   * ⚠️ **只动隐藏集合**：不碰黑名单、不碰账号、不碰 `providerClosed`。
+   * ⚠️ 幂等且无变更不落盘（与 `setProviderClosed` 同口径）。
+   */
+  async setProviderHidden(provider: string, hidden: boolean): Promise<void> {
+    this.ensureLoaded()
+    const current = this.hiddenProvidersCache.includes(provider)
+    if (current === hidden) return
+    const next = hidden
+      ? [...this.hiddenProvidersCache, provider]
+      : this.hiddenProvidersCache.filter((item) => item !== provider)
+    this.hiddenProvidersCache = next
+    // ⚠️ 必须先同步给包装层再落盘：否则「落盘成功但本进程仍显示」，
+    //    用户以为点了没反应（包装层读的是单例，不是本缓存）。
+    setHiddenProviders(next)
+    if (this.store.kind === 'memory') {
+      this.ctx.logger?.warn?.('[jet-hub] 无持久化后端，选择器隐藏状态未落盘')
+      return
+    }
+    await this.queueStoreSave()
   }
 
   /**

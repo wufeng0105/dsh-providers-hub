@@ -1626,6 +1626,13 @@ export interface RpcAggregateCatalogResponse {
    * 用户可以切到手工模式却一条都没拖过）。
    */
   orderMode: 'expiry' | 'manual'
+  /**
+   * 当前**从模型选择器隐藏**的渠道 id（2026-11-16 用户诉求）。
+   *
+   * ⚠️ 权威在宿主（`selector-visibility.ts`）：客户端只渲染、不判定。
+   * ⚠️ 空数组 = 全部显示（升级前行为）。
+   */
+  hiddenProviders: string[]
 }
 
 /** RPC: 设置某条候选是否拒绝参与轮换请求 */

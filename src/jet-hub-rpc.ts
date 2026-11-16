@@ -11339,7 +11339,11 @@ function registerJetHubEndpoints(
         // ⚠️ `orderMode` 与每个模型的 `order` **由 `describeCatalog` 从池里读**（不是这里读）：
         //    两处都读会让「面板显示的排序方式」与「实际用的」在某个时刻分叉。
         //    客户端**不得**重算这两项（红线：同一语义两套判据）。
-        const value: RpcAggregateCatalogResponse = catalog
+        const value: RpcAggregateCatalogResponse = {
+          ...catalog,
+          // ⚠️ 权威在宿主：客户端只渲染这个列表，**不得**自己推导谁被隐藏。
+          hiddenProviders: pool.listHiddenProviders(),
+        }
         return { ok: true, value }
       }
 
@@ -11497,6 +11501,37 @@ function registerJetHubEndpoints(
        * ⚠️ 只接受两个字面量：畸形值若被静默接受，面板会显示「按手工」而宿主按临期路由
        *（显示与行为分叉）。
        */
+      /**
+       * 设置/清除「从模型选择器隐藏」（2026-11-16 用户诉求）。
+       *
+       * ⚠️ **只改可见性**：不动黑名单、不动账号、不动 `providerClosed`
+       * ⇒ 被隐藏的渠道仍参与聚合轮换、积分照常。
+       * ⚠️ 不失效目录缓存：隐藏只影响宿主侧 `listModels` 的**返回**，不影响聚合推导
+       * （聚合读的是未套隐藏层的原适配器）。
+       */
+      case 'aggregate.setHidden': {
+        const req = payload as { provider?: unknown; hidden?: unknown }
+        const provider = typeof req?.provider === 'string' ? req.provider.trim() : ''
+        if (provider.length === 0 || provider === AGGREGATE_PROVIDER) {
+          return {
+            ok: false,
+            error: { code: 'bad-request', message: 'provider 必须是具体渠道 id（不能是聚合自身）' },
+          }
+        }
+        if (typeof req?.hidden !== 'boolean') {
+          return {
+            ok: false,
+            error: { code: 'bad-request', message: 'hidden 必须是布尔值' },
+          }
+        }
+        await pool.setProviderHidden(provider, req.hidden)
+        ctx.logger.info(`[jet-hub] 选择器：${req.hidden ? '隐藏' : '显示'}渠道 ${provider}`)
+        // ⚠️ 广播「适配器目录变了」：客户端把选择器目录缓存在 store 里，
+        //    不广播则用户要重启/重开会话才看到分组消失。
+        broadcastCatalogChanged(ctx)
+        return { ok: true, value: { hiddenProviders: pool.listHiddenProviders() } }
+      }
+
       case 'aggregate.setOrderMode': {
         const req = payload as RpcAggregateSetOrderModeRequest
         if (req?.mode !== 'expiry' && req?.mode !== 'manual') {
