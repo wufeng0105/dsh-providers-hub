@@ -427,6 +427,88 @@ export const CANONICAL_OVERRIDES: Readonly<Record<string, Readonly<Record<string
   })
 
 /**
+ * 型号统一表（2026-11-16，规格 `docs/superpowers/specs/2026-11-16-canonical-unify-design.md`）。
+ *
+ * ## 它解决什么
+ * 同一型号在各渠道的**写法变体**（连字符有无、`-free` 后缀）会归一成不同的键，
+ * 于是聚合里同一模型出现多条。本表在 `canonicalKeyFor` 算出规范键**之后**再查一次，
+ * 命中即收敛到通用型号键。它是配置表驱动的确定性归一，**不是**人工逐条核查的补丁。
+ *
+ * ## ⚠️ 三条铁律（与 `CANONICAL_OVERRIDES` 同源）
+ * 1. **pattern 只收写法变体**（连字符 / `-free`），**绝不写通用日期规则**：
+ *    codearts 的 `-0731` 与无后缀 `deepseek-v4-flash` 是后端**不同模型、benefit 属性相反**
+ *    （`models.spec.ts` / `models.ts` 实测），通用剥日期会把请求打到错模型。
+ *    日期快照（`-1017`/`-0813`）的归并已由上方逐条补丁完成，本表不重复也不推广。
+ * 2. **不同型号绝不互并**：pattern 全部锚定（`^…$`），`glm-5-3` 不吸 `glm-5-3-flash`、
+ *    `glm-5` 不吸 `glm-5v-turbo`、`minimax-m3` 不吸 `minimax-m3-1-flash`。
+ * 3. **未实测的变体不并**：`-preview` / `-official` / `-sg` / 裸 `deepseek-flash`（代际未确认）
+ *    一律保留独立键（规格 §5 登记）。宁可拆开也不误并。
+ *
+ * ## `via` 归属
+ * pattern 命中**保持原通道**（id/name）—— 这是确定性归一，不标 `⚠️补丁`；
+ * 只有下方 `CANONICAL_UNIFY_EXACT`（机器代号，键被改写）才标 `via: 'patch'`。
+ */
+interface CanonicalUnifyRule {
+  /** 统一后的规范键（= 对外 modelId）。 */
+  key: string
+  /** 官方展示名（同时登记进 {@link CANONICAL_NAMES}）。 */
+  name: string
+  /** 作用在**归一化后**的键上的正则（小写、点→连字符；见 normalizeModelKey）。 */
+  pattern: RegExp
+}
+
+const CANONICAL_UNIFY_RULES: readonly CanonicalUnifyRule[] = Object.freeze([
+  { key: 'deepseek-v4-1-flash', name: 'DeepSeek V4.1 Flash', pattern: /^deepseek-v4-1-flash(-free)?$/ },
+  { key: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', pattern: /^deepseek-v4-flash(-free)?$/ },
+  { key: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', pattern: /^deepseek-v4-pro(-free)?$/ },
+  { key: 'glm-5-3-flash', name: 'GLM-5.3-Flash', pattern: /^glm-5-3-flash(-free)?$/ },
+  { key: 'glm-5-3', name: 'GLM-5.3', pattern: /^glm-5-3(-free)?$/ },
+  { key: 'glm-5-2', name: 'GLM-5.2', pattern: /^glm-5-2(-free)?$/ },
+  { key: 'glm-5-1', name: 'GLM-5.1', pattern: /^glm-5-1(-free)?$/ },
+  { key: 'glm-5', name: 'GLM-5', pattern: /^glm-5(-free)?$/ },
+  { key: 'minimax-m3-1-flash', name: 'MiniMax-M3.1-Flash', pattern: /^minimax-m3-1-flash(-free)?$/ },
+  { key: 'minimax-m3', name: 'MiniMax-M3', pattern: /^minimax-m3(-free)?$/ },
+  { key: 'minimax-m2-7', name: 'MiniMax-M2.7', pattern: /^minimax-m2-7(-free)?$/ },
+  { key: 'qwen4-max', name: 'Qwen4-Max', pattern: /^qwen-?4-max(-free)?$/ },
+  { key: 'qwen3-8-flash', name: 'Qwen3.8-Flash', pattern: /^qwen-?3-8-flash(-free)?$/ },
+  { key: 'qwen3-8-max', name: 'Qwen3.8-Max', pattern: /^qwen-?3-8-max(-free)?$/ },
+  { key: 'qwen3-7-max', name: 'Qwen3.7-Max', pattern: /^qwen-?3-7-max(-free)?$/ },
+  { key: 'qwen3-7-plus', name: 'Qwen3.7-Plus', pattern: /^qwen-?3-7-plus(-free)?$/ },
+  { key: 'qwen3-7-flash', name: 'Qwen3.7-Flash', pattern: /^qwen-?3-7-flash(-free)?$/ },
+  { key: 'qwen3-6-plus', name: 'Qwen3.6-Plus', pattern: /^qwen-?3-6-plus(-free)?$/ },
+])
+
+/**
+ * 机器代号 → 统一键（无法用正则安全匹配的，逐条登记）。
+ *
+ * 出处：`docs/agent-notes/providers-astudio.md` §1 真网实测表（2026-11-16，
+ * 7 个目录模型逐个发 `/responses` 均 200，显示名与型号一一对应）：
+ * - `xopglm52` = GLM-5.2；`xopdeepseekv4pro0813` = DeepSeek-V4-Pro；
+ * - `xopdsv4flash0731in` = DeepSeek-V4-Flash。
+ *
+ * ⚠️ 这些 id 字面上不含型号 token，正则匹配不到，只能逐条实测登记（仓库铁律：不猜）。
+ * 命中 ⇒ `via: 'patch'`（面板标 `⚠️补丁` 供人工核查）。
+ */
+const CANONICAL_UNIFY_EXACT: Readonly<Record<string, string>> = Object.freeze({
+  xopglm52: 'glm-5-2',
+  xopdeepseekv4pro0813: 'deepseek-v4-pro',
+  xopdsv4flash0731in: 'deepseek-v4-flash',
+})
+
+/**
+ * 该键是否是型号统一表的**目标键**（统一条目）。
+ *
+ * 请求路径据此分支：统一条目无思考选择器、建池放宽 default-rejected、选序不截断、
+ * 转发恒顶格（见 `aggregate-adapter.ts`）。判据**只留这一处**，适配器只 import。
+ *
+ * ⚠️ 用数组 `.some` 精确比 `key`，不用 `in`/原型链查表（表是数组，无原型链键问题；
+ * 但 `constructor` 等输入仍必须返回 false —— `.some` 天然满足）。
+ */
+export function isUnifiedKey(key: string): boolean {
+  return CANONICAL_UNIFY_RULES.some((rule) => rule.key === key)
+}
+
+/**
  * 一个候选条目归入哪个规范键。
  *
  * 顺序（**不可调换**）：
@@ -504,6 +586,19 @@ export function canonicalKeyFor(
     : { key: idKey, via: 'id' as const }
   // 兜底：任何候选键落在排除集里（含 `auto`）一律不归入任何虚拟模型。
   if (EXCLUDED_ALIASES.has(chosen.key)) return undefined
+
+  // ⚠️ 型号统一表（2026-11-16）：在算出规范键**之后**查，命中即收敛到通用型号键。
+  //    顺序：EXACT（机器代号，键被改写 ⇒ via=patch）→ pattern（写法变体 ⇒ 保持原通道）。
+  //    既有 provider 补丁（上方 patched 分支）优先级更高，已先返回，不会走到这里。
+  if (Object.hasOwn(CANONICAL_UNIFY_EXACT, chosen.key)) {
+    const unified = CANONICAL_UNIFY_EXACT[chosen.key]!
+    return EXCLUDED_ALIASES.has(unified) ? undefined : { key: unified, via: 'patch' }
+  }
+  const rule = CANONICAL_UNIFY_RULES.find((r) => r.pattern.test(chosen.key))
+  if (rule !== undefined) {
+    // pattern 命中保持原通道（确定性归一，不标 ⚠️补丁）；产物仍过排除集。
+    return EXCLUDED_ALIASES.has(rule.key) ? undefined : { key: rule.key, via: chosen.via }
+  }
   return chosen
 }
 
@@ -550,6 +645,8 @@ const CANONICAL_NAMES: Readonly<Record<string, string>> = Object.freeze({
   'minimax-m2-7': 'MiniMax-M2.7',
   'minimax-m2-7-highspeed': 'MiniMax-M2.7-highspeed',
   'minimax-m3-1-flash-preview': 'MiniMax-M3.1-Flash-Preview',
+  'minimax-m3-1-flash': 'MiniMax-M3.1-Flash',
+  'qwen4-max': 'Qwen4-Max',
   'qwen3-8-max': 'Qwen3.8-Max',
   'qwen3-8-flash': 'Qwen3.8-Flash',
   'qwen3-7-max': 'Qwen3.7-Max',

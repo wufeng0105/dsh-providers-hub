@@ -5,6 +5,7 @@ import {
   canonicalDisplayName,
   canonicalKeyFor,
   channelOf,
+  isUnifiedKey,
   normalizeModelKey,
   normalizeNameKey,
 } from '../../src/canonical-models.js'
@@ -670,5 +671,99 @@ describe('deepseek 的日期快照后缀（-1017 / -0813）：归到对应无后
       .toBe('deepseek-v4-1-flash-sg')
     expect(canonicalKeyFor('workbuddy', 'deepseek-v4.1-flash', 'Deepseek-V4.1-Flash')?.key)
       .toBe('deepseek-v4-1-flash')
+  })
+})
+
+describe('型号统一表（2026-11-16 规格 §3.2）：写法变体收敛为通用型号键', () => {
+  // 正向：写法变体（连字符有无 / -free）与机器代号收敛到统一键。
+  // provider 用不在既有补丁表里的 'buddy'/'astudio'，确保走的是统一表而非旧补丁。
+  it.each([
+    ['deepseek-v4.1-flash', 'deepseek-v4-1-flash'],
+    ['deepseek-v4.1-flash-free', 'deepseek-v4-1-flash'],
+    ['deepseek-v4-flash', 'deepseek-v4-flash'],
+    ['deepseek-v4-pro', 'deepseek-v4-pro'],
+    ['glm-5.3-flash-free', 'glm-5-3-flash'],
+    ['glm-5.3', 'glm-5-3'],
+    ['glm-5.2', 'glm-5-2'],
+    ['glm-5', 'glm-5'],
+    ['minimax-m3.1-flash', 'minimax-m3-1-flash'],
+    ['minimax-m3', 'minimax-m3'],
+    ['minimax-m2.7', 'minimax-m2-7'],
+    ['qwen4-max', 'qwen4-max'],
+    ['qwen-4-max', 'qwen4-max'],
+    ['qwen-3.8-flash', 'qwen3-8-flash'],
+    ['qwen3.8-flash', 'qwen3-8-flash'],
+    ['qwen-3.8-max', 'qwen3-8-max'],
+    ['qwen-3.7-plus', 'qwen3-7-plus'],
+    ['qwen-3.6-plus', 'qwen3-6-plus'],
+  ])('%s ⇒ %s', (realId, key) => {
+    expect(canonicalKeyFor('buddy', realId, realId)?.key).toBe(key)
+  })
+
+  // 机器代号三条（出处 docs/agent-notes/providers-astudio.md §1 真网实测表）。
+  it.each([
+    ['xopglm52', 'glm-5-2'],
+    ['xopdeepseekv4pro0813', 'deepseek-v4-pro'],
+    ['xopdsv4flash0731in', 'deepseek-v4-flash'],
+  ])('机器代号 %s ⇒ %s', (realId, key) => {
+    expect(canonicalKeyFor('astudio', realId, realId)?.key).toBe(key)
+  })
+
+  // 反向：不同型号 / 未实测变体绝不互并（Review Focus 1）。
+  it.each([
+    ['glm-5.3-flash', 'glm-5-3-flash'],                 // 不得被 glm-5-3 吸走
+    ['glm-5v-turbo', 'glm-5v-turbo'],                   // 不得被 glm-5 吸走
+    ['glm-5-turbo', 'glm-5-turbo'],
+    ['minimax-m3.1-flash', 'minimax-m3-1-flash'],       // 不得被 minimax-m3 吸走
+    ['minimax-m2.7-highspeed', 'minimax-m2-7-highspeed'], // 独立条目不并
+    ['minimax-m3.1-flash-preview', 'minimax-m3-1-flash-preview'], // preview 无实测依据不并
+    ['deepseek-v4-flash-0731', 'deepseek-v4-flash-0731'], // 日期快照不通用合并（后端不同模型）
+    ['deepseek-v4-flash-official', 'deepseek-v4-flash-official'], // 规格 §5 刻意不并
+    ['deepseek-v4-pro-official', 'deepseek-v4-pro-official'],
+    ['deepseek-flash', 'deepseek-flash'],               // 代际未实测，首批不并（规格 §5）
+    ['deepseek-v4.1-flash-sg', 'deepseek-v4-1-flash-sg'], // 区域通道不并
+    ['kimi-k3', 'kimi-k3'],                             // 表外键原样
+  ])('%s 保持 %s（不互并）', (realId, key) => {
+    expect(canonicalKeyFor('buddy', realId, realId)?.key).toBe(key)
+  })
+
+  it('机器代号 EXACT 命中 ⇒ via=patch（面板标 ⚠️补丁）', () => {
+    expect(canonicalKeyFor('astudio', 'xopglm52', 'GLM-5.2')?.via).toBe('patch')
+    expect(canonicalKeyFor('astudio', 'xopdeepseekv4pro0813', 'DeepSeek-V4-Pro')?.via).toBe('patch')
+  })
+
+  it('写法变体 pattern 命中 ⇒ via 保持原通道（不标 patch）', () => {
+    expect(canonicalKeyFor('buddy', 'deepseek-v4.1-flash', 'Deepseek-V4.1-Flash')?.via).toBe('id')
+    expect(canonicalKeyFor('qoder', 'gfmodel', 'GLM-5.3-Flash')?.via).toBe('name')
+    // -free 被收掉也保持原通道（配置表驱动的确定性归一，不是人工补丁）
+    expect(canonicalKeyFor('buddy', 'glm-5.3-flash-free', 'GLM-5.3-Flash')?.via).toBe('id')
+  })
+
+  it('既有 provider 补丁优先于统一表', () => {
+    // lobsterai 的 deepseek-flash 补丁指向 v4-1-flash（实测），不得被统一表的任何规则抢走
+    expect(canonicalKeyFor('lobsterai', 'deepseek-flash', 'DeepSeek-V4.1-Flash'))
+      .toEqual({ key: 'deepseek-v4-1-flash', via: 'patch' })
+  })
+
+  it('排除集在统一表之后仍生效（auto 不得产出虚拟键）', () => {
+    expect(canonicalKeyFor('buddy', 'auto', 'Auto')).toBeUndefined()
+    expect(canonicalKeyFor('qoder', 'some-internal-key', 'Auto')).toBeUndefined()
+  })
+
+  it('isUnifiedKey：表内键真、表外键假、原型链键假', () => {
+    expect(isUnifiedKey('glm-5-3')).toBe(true)
+    expect(isUnifiedKey('deepseek-v4-flash')).toBe(true)
+    expect(isUnifiedKey('minimax-m3-1-flash')).toBe(true)
+    expect(isUnifiedKey('qwen4-max')).toBe(true)
+    expect(isUnifiedKey('kimi-k3')).toBe(false)
+    expect(isUnifiedKey('deepseek-flash')).toBe(false) // 未并的裸键不是统一键
+    expect(isUnifiedKey('constructor')).toBe(false)
+    expect(isUnifiedKey('auto')).toBe(false)
+  })
+
+  it('CANONICAL_NAMES 给新统一键登记了展示名', () => {
+    expect(canonicalDisplayName('minimax-m3-1-flash')).toBe('MiniMax-M3.1-Flash')
+    expect(canonicalDisplayName('qwen4-max')).toBe('Qwen4-Max')
+    expect(canonicalDisplayName('glm-5-3')).toBe('GLM-5.3')
   })
 })
