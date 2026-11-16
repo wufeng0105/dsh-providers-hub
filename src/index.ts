@@ -268,6 +268,8 @@ import { createGeminiSigStore } from './gemini-sigstore.js'
 import { OpencodeAdapter, registerOpencodeLlm } from './opencode-adapter.js'
 import { AUTO_PROVIDER, registerAutoLlm } from './auto-adapter.js'
 import { syncHiddenProviders } from './selector-visibility.js'
+import { loadModelAliases } from './model-alias-file.js'
+import { setUserModelIdentities } from './canonical-models.js'
 import { AGGREGATE_PROVIDER, registerAggregateLlm } from './aggregate-adapter.js'
 // ⚠️ `createExpiryProbe` 从**底座**导入，不是从 `aggregate-adapter.js`
 //（它定义在 `aggregate-expiry.ts`，理由见该文件与 Task 7 的 Files 说明）。
@@ -1143,6 +1145,33 @@ export function apply(ctx: Context): void {
   } catch (error) {
     ctx.logger?.warn?.(
       `[jet-hub] 载入「选择器隐藏」集合失败（本次启动将显示全部渠道）：${String(error)}`,
+    )
+  }
+
+  /**
+   * **用户层模型别名**（`~/.dsh/jet-hub/model-aliases.json`，2026-11-17 的「口子」）。
+   *
+   * ⚠️ 必须在**任何目录推导之前**注入：`canonicalKeyFor` 在推导时读它，
+   * 注入晚了会让首轮目录用旧规则（60 秒 TTL 内都错，且无任何提示）。
+   * ⚠️ 坏行只 warn、不阻断启动：这是用户手写的文件，容错是硬要求。
+   */
+  try {
+    const aliasHome = resolveJetHubHome(ctx)
+    if (aliasHome !== undefined) {
+      const parsed = loadModelAliases(aliasHome)
+      setUserModelIdentities(parsed.rules)
+      if (parsed.rules.length > 0) {
+        ctx.logger?.info?.(
+          `[jet-hub] 已载入用户模型别名 ${parsed.rules.length} 条（model-aliases.json）`,
+        )
+      }
+      for (const problem of parsed.problems) {
+        ctx.logger?.warn?.(`[jet-hub] model-aliases.json：${problem}（该行已跳过）`)
+      }
+    }
+  } catch (error) {
+    ctx.logger?.warn?.(
+      `[jet-hub] 载入用户模型别名失败（本次启动使用内置表）：${String(error)}`,
     )
   }
 

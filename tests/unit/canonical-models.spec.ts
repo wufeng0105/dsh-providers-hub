@@ -284,9 +284,12 @@ describe('canonicalKeyFor：主通道 + 补丁', () => {
 
   it('补丁优先于两个通道（lobsterai 的远端专有 id）', () => {
     // lobsterai 的 deepseek-flash 是远端专有 id，展示名叫 DeepSeek-V4.1-Flash。
-    // id 通道会给出 `deepseek-flash`（与 V4.1 Flash 无字面关系），故必须靠补丁。
+    // id 通道会给出 `deepseek-flash`。
+    // ⚠️ 2026-11-17 重构后：它**不再需要单独补丁** —— 单表里的 DeepSeek Flash
+    //    pattern 已经覆盖 `deepseek-flash` 这种形态（跨代际合并），故 `via` 是 `id`
+    //    而不是 `patch`。`patch` 现在只留给**字面 id**（机器代号 / 渠道前缀写法）。
     expect(canonicalKeyFor('lobsterai', 'deepseek-flash', 'DeepSeek-V4.1-Flash'))
-      .toEqual({ key: 'deepseek-flash', via: 'patch' })
+      .toEqual({ key: 'deepseek-flash', via: 'id' })
   })
 
   it('补丁只覆盖登记的 id，其余走各自通道（但同档仍会被统一表合并）', () => {
@@ -393,8 +396,9 @@ describe('magicrew（超级麦吉国内站，2026-10-29）：qwen 归一化补�
     // 判据是**跨渠道同键**（不是字符串相等）：与 loomy 的既有键逐字相同。
     expect(canonicalKeyFor('magicrew', 'qwen-3.8-flash', 'Qwen3.8 Flash')?.key)
       .toBe(canonicalKeyFor('loomy', 'qwen3.8-flash', 'qwen 3.8 flash · x0.8')?.key)
-    // 归属来源必须是 patch（人工实测结论），不是靠 id 通道撞出来的
-    expect(canonicalKeyFor('magicrew', 'qwen-3.8-flash', 'Qwen3.8 Flash')?.via).toBe('patch')
+    // ⚠️ 2026-11-17 重构后：不再靠补丁，而靠单表里的 `qwen-?3-8-flash` pattern
+    // （两种连接写法都收）⇒ `via` 是 `id` 而不是 `patch`。
+    expect(canonicalKeyFor('magicrew', 'qwen-3.8-flash', 'Qwen3.8 Flash')?.via).toBe('id')
     // 反面：其余 26 个不需要补丁，归一化结果本来就一致
     expect(canonicalKeyFor('magicrew', 'deepseek-v4.1-flash', 'DeepSeek V4.1 Flash')?.via)
       .toBe('id')
@@ -632,8 +636,8 @@ describe('deepseek 的日期快照后缀（-1017 / -0813）：归到对应无后
   it('★ codearts 的 `…-1017` 归到 `deepseek-v4-1-flash`', () => {
     const got = canonicalKeyFor('codearts', 'deepseek-v4.1-flash-1017', 'DeepSeek-V4.1-Flash-1017 · x0.12')
     expect(got?.key).toBe('deepseek-flash')
-    // 归属必须来自补丁（人工实测结论），不是 id 通道撞出来的
-    expect(got?.via).toBe('patch')
+    // ⚠️ 2026-11-17 重构后：快照后缀由单表 pattern 收，不再需要逐条补丁 ⇒ via 是 id。
+    expect(got?.via).toBe('id')
     // 判据是「与同渠道无后缀版本同键」
     expect(got?.key).toBe(canonicalKeyFor('codearts', 'deepseek-v4.1-flash', 'DeepSeek-V4.1-Flash · x0.09')?.key)
   })
@@ -643,7 +647,8 @@ describe('deepseek 的日期快照后缀（-1017 / -0813）：归到对应无后
     //    若有人把键简化成 `DeepSeek-V4.1-Flash-1017`，这里会变红。
     const got = canonicalKeyFor('modelscope', 'deepseek-ai/DeepSeek-V4.1-Flash-1017', 'DeepSeek-V4.1-Flash (魔搭)')
     expect(got?.key).toBe('deepseek-flash')
-    expect(got?.via).toBe('patch')
+    // 命名空间前缀由 normalizeModelKey 剥离，快照由 pattern 收 ⇒ via 是 id。
+    expect(got?.via).toBe('id')
     expect(got?.key).toBe(canonicalKeyFor('modelscope', 'deepseek-ai/DeepSeek-V4.1-Flash', 'DeepSeek-V4.1-Flash (魔搭)')?.key)
   })
 
@@ -652,7 +657,7 @@ describe('deepseek 的日期快照后缀（-1017 / -0813）：归到对应无后
     // 不并的话主行里挂着一个必然失败的候选，而能用的那条单独成一列。
     const got = canonicalKeyFor('modelscope', 'deepseek-ai/DeepSeek-V4-Pro-0813', 'DeepSeek-V4-Pro-0813 (魔搭)')
     expect(got?.key).toBe('deepseek-v4-pro')
-    expect(got?.via).toBe('patch')
+    expect(got?.via).toBe('id')
     expect(got?.key).toBe(canonicalKeyFor('modelscope', 'deepseek-ai/DeepSeek-V4-Pro', 'DeepSeek-V4-Pro (魔搭)')?.key)
   })
 
@@ -763,15 +768,24 @@ describe('型号统一表（2026-11-16）：同档变体与机器代号收敛为
     expect(canonicalKeyFor('buddy', 'glm-5.3-flash-free', 'GLM-5.3-Flash')?.via).toBe('id')
   })
 
-  it('★ 既有 provider 补丁的产物**同样进入统一表**（初版真缺陷：它们曾绕过）', () => {
-    // creamarts/modelscope/lobsterai 的补丁值指向旧键 `deepseek-v4-1-flash`，
-    // 若补丁分支提前 return 就会绕过统一表 ⇒ 同一型号仍两条（2026-11-16 修）。
+  it('★ 单表重构后：「同键」只有一条路径（旧补丁一律由 pattern 覆盖）', () => {
+    // ⚠️ 2026-11-17 重构：原用例测的是「补丁产物也要过统一表」——
+    //    那是**两张表并存**时期的缺陷（补丁分支提前 return 会绕过统一表）。
+    //    现在只有一张表、一种匹配路径，该缺陷**结构上不可能再出现**。
+    //    本用例改为钉住「这些曾经必须靠补丁的写法，现在全部由 pattern 收到同键」。
+    // lobsterai：远端专有 id → 曾经靠补丁 → 现在靠 pattern
     expect(canonicalKeyFor('lobsterai', 'deepseek-flash', 'DeepSeek-V4.1-Flash'))
-      .toEqual({ key: 'deepseek-flash', via: 'patch' })
+      .toEqual({ key: 'deepseek-flash', via: 'id' })
+    // codearts / modelscope 的日期快照 → 曾经靠补丁 → 现在靠 pattern + 命名空间剥离
     expect(canonicalKeyFor('codearts', 'deepseek-v4.1-flash-1017', 'DeepSeek-V4.1-Flash-1017')?.key)
       .toBe('deepseek-flash')
     expect(canonicalKeyFor('modelscope', 'deepseek-ai/DeepSeek-V4.1-Flash-1017', 'DeepSeek-V4.1-Flash (魔搭)')?.key)
       .toBe('deepseek-flash')
+    // ⚠️ 但仍必须能区分「靠字面 id 登记」的条目（机器代号 / 渠道前缀写法）——
+    //    它们的 via 是 patch，这是唯一保留 patch 语义的地方（面板标 ⚠️补丁）。
+    expect(canonicalKeyFor('astudio', 'xopglm52', 'GLM-5.2')?.via).toBe('patch')
+    expect(canonicalKeyFor('autoclaw', 'zai_glm-5.3-flash', 'GLM-5.3 Flash (AutoClaw)')?.via)
+      .toBe('patch')
   })
 
   it('排除集在统一表之后仍生效（auto 不得产出虚拟键）', () => {

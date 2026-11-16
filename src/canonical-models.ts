@@ -1,43 +1,38 @@
 /**
- * 跨渠道模型**归一化**：把同一个真实模型在各 provider 下的不同 modelId / 不同
- * 展示名，收敛成一个「候选键」，供聚合 provider 归组。
+ * 跨渠道模型**身份归一**：把同一个真实模型在各 provider 下的不同 modelId / 不同
+ * 展示名，收敛成一个「规范键」，供聚合 provider 归组。
  *
- * ## 为什么需要两张通道（id 与 name）
+ * ## 本模块只有**一张表**
  *
- * 各 provider 的 modelId **不都是自描述的**：
+ * 2026-11-17 重构：原先这里并列着四张表（`CANONICAL_OVERRIDES` /
+ * `CANONICAL_UNIFY_RULES` / `CANONICAL_UNIFY_EXACT` / `CANONICAL_NAMES`），
+ * 它们其实回答的是**同一个问题**——「（渠道、id、名字）属于哪个模型、叫什么」。
+ * 四张表带来的是**四处要同步维护**，且其中 7 条补丁在统一表出现后已完全冗余
+ *（实测：删掉它们行为逐字节不变）。
  *
- * | provider | modelId | 展示名 | id 能认出模型吗 |
- * |---|---|---|---|
- * | buddy / codearts / lobsterai / opencode | `deepseek-v4.1-flash` | `Deepseek-V4.1-Flash` | ✅ |
- * | raccoon | `sn-glm-5-3` | `GLM-5-3 · x0.75` | ✅（剥 `sn-` 后） |
- * | **qoder / qodercn** | **`gfmodel`** | `GLM-5.3-Flash` | ❌ **内部代号** |
- * | trae | `DeepSeek-V4-Flash-Official` | 同左 | ✅ |
+ * ⇒ 现在只有 {@link MODEL_IDENTITIES}：**每行 = 一个模型**，行内自带它的全部别名
+ *（正则 + 字面 id）与展示名。**新增模型 = 加一行**，不改任何代码。
  *
- * qoder 那类必须靠**展示名**通道才能归组 —— 这是本设计要两张通道的原因。
+ * ## 两层：内置表 + 用户层
  *
- * ## 仲裁规则：按 provider 声明**主通道**，不是两通道投票
+ * - {@link BUILTIN_MODEL_IDENTITIES}：随插件发布，**只读**；
+ * - {@link setUserModelIdentities}：用户在 `~/.dsh/jet-hub/model-aliases.json` 里
+ *   追加/覆盖的规则（由接线层读文件后注入）。**用户层优先**命中。
  *
- * ⚠️ 实测（见本文件单测）：**展示名通道会错误合并 workbuddy 的
- * `deepseek-v4.1-flash` 与 `deepseek-v4.1-flash-sg`** —— 两者展示名逐字都是
- * `Deepseek-V4.1-Flash`，但 `-sg` 是新加坡区的**另一条通道**。若两通道投票或
- * 让 name 通道优先，这两个不同的东西会被并成一个虚拟模型，而请求只发往其中一个
- * ⇒ 用户以为在用新加坡区，实际打到了主区（静默错配）。
+ * ## 两条通道（id / name）仍然保留
  *
- * ⇒ 规则：**按 provider 声明主通道**。只有 qoder / qodercn（id 是代号）声明为
- * `name`，其余全部 `id`。
+ * 各 provider 的 modelId **不都是自描述的**：qoder 的 `gfmodel`、accio 的
+ * `1Drift-…`、marvis 的槽位名 `deepseek-v4-pro-external` 都是内部代号，
+ * 真名只在展示名里 ⇒ 这些 provider 必须走 `name` 通道（见 {@link PRIMARY_CHANNEL}）。
  *
- * ⚠️ **「主通道算不出结果时才回落另一通道」的回落逻辑不在本模块**：本文件只提供
- * {@link channelOf} 这个「主通道是哪条」的判据，回落由 Task 2 的
- * `canonicalKeyFor` 负责（它才需要在归一化结果为空时改走另一条通道）。
+ * ⚠️ **展示名通道会错误合并 workbuddy 的 `-sg`**（两者展示名逐字相同、却是两条
+ * 区域链路）⇒ 绝不做「两通道投票」，只按 provider 声明的主通道。
  *
- * ## 保守方向：宁可漏合并，不可错合并
+ * ## 铁律：宁可漏合并，不可错合并
  *
- * - 日期快照（`-0731`）**不剥离** ⇒ 与无后缀版本分开；
- * - `-official` 后缀**不剥离** ⇒ 与无后缀版本分开；
- * - 归一化结果互不相同的候选**不合并**（各自成为一个虚拟模型，或都不归入）。
- *
- * 漏合并的代价是「同一个模型出现两条」，用户一眼能看出并手工关掉一条；
+ * 漏合并的代价是「同一模型出现两条」，用户一眼看得出、能手工关掉；
  * 错合并的代价是「请求打到了不是用户想要的那个模型」，且**没有任何提示**。
+ * ⇒ 表内所有 pattern 一律**锚定**（`^…$`），不同档位绝不互并。
  *
  * @module src/canonical-models.ts
  */
@@ -47,12 +42,16 @@
  *
  * 两个来源：
  * - workbuddy 的 `default-model` / `fast-model` / `balanced-model` /
- *   `primary-model` / `deep-model` 是**服务端抽象路由**（名字就叫 Auto / Fast /
- *   Balanced / Primary / Deep），由后端决定实际用哪个模型；
- * - qoder 系的 `auto` 是**客户端选模模式**，不是可指定调用的模型。
+ *   `primary-model` / `deep-model` 是**服务端抽象路由**；
+ * - qoder 系的 `auto` 是**客户端选模模式**。
  *
- * ⚠️ 它们若参与归一化会变成若干「只有一个渠道」的虚拟模型，且语义上是空的
- * （用户选 `aggregate/default-model` 等于选了个我们无法保证语义的东西）。
+ * ⚠️ 它们若参与归一化会变成若干「只有一个渠道」的虚拟模型，且语义上是空的。
+ *
+ * ⚠️⚠️ **不要**把 AutoClaw 的 `zai_auto` / `zai_auto-fast` 加进本集合：
+ * 它们是上游**真实存在、可直接调用**的模型（有独立能力声明与实测依据）。
+ * 加进来的后果**不是合并、而是消失**（`canonicalKeyFor` 返回 undefined ⇒
+ * `buildVirtualModels` 直接 continue ⇒ 聚合里再也选不到）。
+ * 那是**显示名**问题，正解是给它们登记人类可读名，不是删模型。
  */
 export const EXCLUDED_ALIASES: ReadonlySet<string> = new Set([
   'default-model',
@@ -61,26 +60,6 @@ export const EXCLUDED_ALIASES: ReadonlySet<string> = new Set([
   'primary-model',
   'deep-model',
   'auto',
-  // ⚠️⚠️ **不要**把 AutoClaw 的 `zai_auto` / `zai_auto-fast` 加进本集合
-  //    （PR #89 初版这么做过，被审计打回）。
-  //
-  //    理由：本集合里的六条全是我们**自己造的聚合入口抽象名**（`auto` /
-  //    `default-model` / `fast-model` …），它们不对应任何上游模型。而
-  //    `zai_auto` / `zai_auto-fast` 是 autoclaw **上游真实存在、可直接调用**的
-  //    两个模型：远端目录里有、且有独立的能力声明与实测依据
-  //    （`contextWindow 1048576`、`maxOutputTokens 393216` / `131072`、
-  //    `supportsImage: true`，见 `src/autoclaw-product.ts` 的
-  //    `AUTOCLAW_FALLBACK_MODELS` 与 `src/autoclaw-adapter.ts`）。
-  //
-  //    加进本集合的实际后果**不是合并、而是消失**：`canonicalKeyFor` 返回
-  //    `undefined` ⇒ `buildVirtualModels` 直接 `continue` ⇒ 该模型不进任何
-  //    虚拟模型 ⇒ 用户在**聚合**选择器里再也选不到 autoclaw 的 Auto / Auto-Fast
-  //    （`autoclaw` 直连不受影响，故症状静默）。实测：模拟 autoclaw 4 条 + buddy
-  //    2 条走 `buildVirtualModels`，加进去之后虚拟模型从 6 条塌成 2 条。
-  //
-  //    PR 初版本想解决的是「聚合列表里出现 `zai_auto` 这种机器名」—— 那是个
-  //    **显示名**问题，正解是在 `CANONICAL_NAMES` 里给它们登记人类可读名
-  //    （见下方 `'zai_auto': 'Auto (AutoClaw)'`），不是删模型。
 ])
 
 /**
@@ -88,26 +67,16 @@ export const EXCLUDED_ALIASES: ReadonlySet<string> = new Set([
  *
  * 未列出的 provider 一律 `id`。⚠️ 不要「为了省事」把 qoder 也改成 `id`：
  * 它的 modelId 是 `gfmodel` 这类内部代号，走 id 通道会让每个模型各自成一个
- * 虚拟模型（`gfmodel` / `gmodel` / `dfmodel` …），跨渠道聚合**完全不发生**。
+ * 虚拟模型，跨渠道聚合**完全不发生**。
  */
 const PRIMARY_CHANNEL: Readonly<Record<string, 'id' | 'name'>> = Object.freeze({
   qoder: 'name',
   qodercn: 'name',
-  // ⚠️ accio（阿里 Accio Work，2026-10-13，用户要求）：与 qoder **完全同因** ——
-  //    它的 `modelCode` 是 `1Drift-F8hS3mK7pL2n` 这种**内部代号**（上游刻意不给
-  //    可读 id，真名只在 `modelDisplayName` 里，详见
-  //    `docs/agent-notes/providers-accio.md` §7）。走 id 通道的实测后果：
-  //    accio 的每个模型各自成一个**孤立虚拟模型**（键形如 `1drift-…`），
-  //    跨渠道聚合**完全不发生** ⇒ 用户在聚合的「Qwen3.8-Flash 轮换列表」里
-  //    **永远看不到 accio**（症状是静默的：它只是不在候选表里）。
-  //    ⚠️ 判据同 qoder：**该渠道的 id 对人类与其它渠道都无信息**，不是「哪个方便」。
+  // accio（阿里 Accio Work）：`modelCode` 是 `1Drift-…` 内部代号，真名只在
+  // `modelDisplayName` 里。走 id 通道 ⇒ 每个模型各自孤立、聚合里永远看不到它。
   accio: 'name',
-  // ⚠️ 腾讯 Marvis（2026-11-09）：与 qoder / accio **同因**，且理由更强 ——
-  //    它的 id 是**槽位名**（2026-11-14 起是 `deepseek-v4-pro-external`，
-  //    此前是 `main-auto`），一个服务端路由保证，实测落到真实模型
-  //    `deepseek-v4-1-flash-261017` ⇒ id 本身**不携带模型身份**，且会随上游
-  //    路由策略变化。真名只在展示名里（`DeepSeek V4.1 Flash`）⇒ 必须走 name
-  //    通道（换槽位不影响键）。
+  // 腾讯 Marvis：id 是**槽位名**（`deepseek-v4-pro-external`，此前是 `main-auto`），
+  // 一个服务端路由保证，会随上游路由策略变化 ⇒ id 不携带模型身份，必须走 name。
   marvis: 'name',
 })
 
@@ -123,25 +92,14 @@ export function channelOf(provider: string): 'id' | 'name' {
  * 1. **剥命名空间前缀**（取最后一个 `/` 之后）：`cline-free/x` → `x`；
  * 2. 去 `:free` 后缀；
  * 3. 剥 `sn-` 前缀（raccoon）；
- * 4. **所有点号转连字符**；
+ * 4. **所有点号转连字符**（`v4.1` → `v4-1`，但**不删点** ⇒ `v4.1` ≠ `v4`）；
  * 5. 空格转连字符（展示名通道会用到）；
  * 6. 全小写。
  *
- * ⚠️ **第 4 步是「所有点号」而不是「版本号里的点号」**（初版写成
- * `/v(\d+)\.(\d+)/` 只匹配 `v4.1` 这种形态，**漏掉了 `6.8` / `k2.8` / `m2.7`
- * 等不带 `v` 的写法** ⇒ `sensenova-6.8-flash`、`kimi-k2.8-preview` 会带着点号
- * 留在键里，与 `CANONICAL_NAMES` 的键对不上）。全部转掉即可 —— 见下方「为什么
- * 全部转掉仍然安全」。
- *
- * ⚠️ **不剥** 4 位数字日期后缀（`-0731`）与 `-official`：见模块头「保守方向」。
- * ⚠️ 第 1 步用 `lastIndexOf`：`cline-free/x` 这类取最后一段即可。
- *
- * ## 为什么「所有点号转连字符」仍然安全
- *
- * 关键风险是「点号一转就把 `v4.1` 与 `v4` 混为一谈」。转连字符**不会**——
- * `deepseek-v4.1-flash` → `deepseek-v4-1-flash`，而 `deepseek-v4-flash` 里
- * 没有点号，保持 `deepseek-v4-flash`，两者**仍然不同**。真正会混淆的是
- * 「删掉点号」（`v41` vs `v4`），本函数不做那件事。
+ * ⚠️ 第 4 步是「**所有**点号」而不是只处理版本号（初版只匹配 `v4.1` 形态，
+ * 漏掉了 `6.8` / `k2.8` / `m2.7` 这些不带 `v` 的写法）。
+ * ⚠️ **不剥** 4 位日期后缀（`-0731`）与 `-official`：它们是**独立信息**
+ *（不同 build / 不同计费桶），归并与否由**表里的 pattern 逐族决定**。
  */
 export function normalizeModelKey(raw: string): string {
   let s = raw.trim().toLowerCase()
@@ -161,12 +119,8 @@ export function normalizeModelKey(raw: string): string {
  * - 倍率后缀 ` · x0.75` / ` · x0.2→x0.1`（raccoon / loomy 直接写在表里）；
  * - 「免费」标注（raccoon 的 `· 免费`、cline 的 ` · 免费`）。
  *
- * ⚠️ 只剥**第一个 `·` 之后**的全部内容：`·` 是倍率分隔符（U+00B7），在本仓库
- * 所有 provider 的展示名里都不作为模型名的一部分出现。
- *
- * ⚠️ 下面那条 `/免费/g` 是**独立于 `·` 规则**的一道闸门：它只对**不带 `·` 的裸
- * 「免费」**生效（`SenseNova-6.8-Flash 免费`）。带 `·` 的形态（`… · 免费`）其实
- * 已被上一行连同 ` · ` 一并剥掉，走不到这里 —— 两种输入在单测里各有一条断言守着。
+ * ⚠️ 只剥**第一个 `·` 之后**的全部内容：`·` 是倍率分隔符，在本仓库所有 provider
+ * 的展示名里都不作为模型名的一部分出现。
  */
 export function normalizeNameKey(name: string): string {
   const stripped = name
@@ -177,385 +131,203 @@ export function normalizeNameKey(name: string): string {
 }
 
 /**
- * Magicrew **两站共用**的规范键补丁（国内 `magicrew` / 国际 `magicrewintl`）。
- *
- * ⚠️ 抽成常量的理由：两站共用同一份 `MAGICREW_FALLBACK_MODELS`（`magicrew-product.ts`
- * 里 `qwen-3.8-flash` 那条 id **带连字符**）⇒ 补丁必须**逐个相同**。
- * 复制两份会让「加一条补丁只改了一边」变成静默缺陷（国际站自成一个孤立虚拟模型，
- * 聚合轮换列表里永远看不到它，零报错零日志 —— 与 `accio` 那次完全同型）。
- *
- * ⚠️ 放在 `CANONICAL_OVERRIDES` **之前**且各自带自己的 JSDoc —— 否则会把
- * 上面那一整块「## 什么时候需要它 / 每条都必须有实测依据」的文档顶掉，
- * 变成孤儿注释（2026-11-01 二审查出的形态：声明插在两个注释块之间）。
+ * 一条模型身份规则。**这就是全部「模型知识」的形状**。
  */
-const MAGICREW_CANONICAL_OVERRIDES: Readonly<Record<string, string>> = Object.freeze({
-  'qwen-3.8-flash': 'qwen3-8-flash',
-})
-
-/**
- * AutoClaw **两站共用**的规范键补丁（国内 `autoclaw` / 国际 `autoclawintl`）。
- *
- * ⚠️ 抽成常量的理由与 `MAGICREW_CANONICAL_OVERRIDES` **同因同形**：
- * `src/autoclaw-product.ts:399` 与 `:430` 两个产品定义的 `fallbackModels` 都是
- * 同一个 `AUTOCLAW_FALLBACK_MODELS`（`:404-406` 的注释逐字写「模型表与国内
- * **逐字节相同**」）⇒ 两站的 id 都是 `zai_glm-5.3-flash` / `zaicoding_glm-5.3`
- * 这一批，补丁必须**逐个相同**。
- *
- * ⚠️⚠️ **漏登记国际站的症状是静默的，而且它会让本 PR 自己制造出「同模型两条」**：
- * 只登记 `autoclaw` 的话 ——
- *
- * | 树 | 虚拟模型 | 候选 |
- * | --- | --- | --- |
- * | 修前 | `zai_glm-5-3-flash` | `autoclaw/…` + `autoclawintl/…`（**2 候选，合并**） |
- * | 只登记国内 | `glm-5-3-flash` | `autoclaw/…` + `buddy/…`（**intl 不在轮换里**） |
- * | 只登记国内 | `zai_glm-5-3-flash` | `autoclawintl/…`（**孤儿，1 候选，展示名就是键本身**） |
- *
- * ⇒ 同一模型仍是两条，只是「合并的那条」从「两站」变成了「国内 + buddy」。
- * 本 PR 的标题是「同一模型被拆成两条虚拟模型」，**只修一半等于把症状挪了个位置**。
- *
- * ⚠️ 两站都在聚合渠道里：`src/aggregate-adapter.ts:1410` 与 `:1418` 的
- * `AGGREGATE_CHANNELS` 同时含 `'autoclaw'` 与 `'autoclawintl'`。
- */
-const AUTOCLAW_CANONICAL_OVERRIDES: Readonly<Record<string, string>> = Object.freeze({
-  'zai_glm-5.3-flash': 'glm-5-3-flash',
-  'zaicoding_glm-5.3': 'glm-5-3',
-})
-
-/**
- * 显式映射补丁：`provider → realId → 规范键`。
- *
- * ## 什么时候需要它
- *
- * 两个通道**都**给不出正确归属时才用。已知两类：
- *
- * 1. **id 是内部代号、展示名又不带版本号**（qoder 系的 `dfmodel` 展示名叫
- *    `DeepSeek-Flash`，同表的 `dmodel` 却叫 `DeepSeek-V4-Pro` —— 前者无法从
- *    展示名判断是 V4 还是 V4.1）；
- * 2. **id 与模型名完全无字面关系**（lobsterai 的远端专有 `deepseek-flash`
- *    实际是 `DeepSeek-V4.1-Flash`，而它兜底表里的 `deepseek-v4-flash` 是
- *    **另一代更旧的模型**）。
- *
- * ## ⚠️ 每条都必须有实测依据
- *
- * 本表**不得**凭名字相似猜测 —— 猜错会让请求打到错的模型，且无任何提示。
- * 未实测确认的条目**不要**加进来（宁可让它各自成一个单渠道虚拟模型）。
- * 实施时用 e2e 探针逐条核对（见设计文档 §11 的 O1/O2）。
- */
-export const CANONICAL_OVERRIDES: Readonly<Record<string, Readonly<Record<string, string>>>> =
-  Object.freeze({
-    lobsterai: Object.freeze({
-      // 远端专有 id；其兜底表里没有它。实测展示名为 DeepSeek-V4.1-Flash
-      // （tests/unit/lobsterai-adapter.spec.ts 的远端桩即此形态）。
-      'deepseek-flash': 'deepseek-v4-1-flash',
-    }),
-    // ⚠️ qoder / qodercn 的 dfmodel 是否属于 V4.1 **尚未实测确认**
-    //（其展示名不带版本号）。在确认前**故意不登记** —— 它会经 name 通道归成
-    // `deepseek-flash`，单独成一个虚拟模型。登记它请先跑实发验证。
-    /**
-     * ⚠️⚠️ **accio**（用户要求它进聚合的轮换候选表，2026-10-13）。
-     *
-     * ## 为什么需要（实测的键形态差异）
-     *
-     * `accio` 走 `name` 通道（见 `PRIMARY_CHANNEL`），而它的展示名 `Qwen 3.8 Flash`
-     * 里**有空格** ⇒ `normalizeNameKey` 把空格转成连字符 ⇒ 得 `qwen-3-8-flash`。
-     * 而 loomy / trae / qoder 走 **id 通道**，id 形如 `qwen3.8-flash`（**无空格**）
-     * ⇒ `normalizeModelKey` 只转点号 ⇒ 得 `qwen3-8-flash`（**无连字符**）。
-     *
-     * ⇒ 两者是**同一个模型但键不同** ⇒ 被拆成两个虚拟模型
-     * ⇒ 用户在聚合的「Qwen3.8-Flash 轮换列表」里**看不到 accio**（症状静默：
-     * 它只是不在候选表里）。实测逐个跑 `canonicalKeyFor`：
-     *
-     * ```
-     * loomy / trae / qoder → qwen3-8-flash   ← 三家在用的既有键
-     * accio（不加补丁）    → qwen-3-8-flash  ← 多一个连字符，成了孤例
-     * ```
-     *
-     * ## ⚠️ 只登记**确知是同一模型**的那些
-     *
-     * 方向是**宁可拆开也不误并**（本文件铁律：猜错会让请求打到错的模型且无提示）。
-     * 逐条实测后的结论：
-     * - `Qwen 3.8 Flash`（`1Drift-F8hS3mK7pL2n`）→ `qwen3-8-flash` ✅ **登记**
-     *   —— 四家展示名逐字一致，确知同模型；
-     * - `Qwen 3.8 Max` → **不登记**：它经 name 通道得 `qwen-3-8-max`，而 loomy 的
-     *   id `qwen-3.8-max` 也得 `qwen-3-8-max`，**本来就一致**，加补丁是多此一举
-     *   （且有守卫锁着「连字符形态本来就一致」这件事）；
-     * - `Qwen 3.8 27B` / `Qwen 3.5 A3B` / `Standard` / `Professional` / `Ultimate`
-     *   → **不登记**：它们是 accio（或其上游）**独有的规格**，猜着并进别家 =
-     *   打错模型。⚠️ 27B 与 A3B 是**两个不同的模型**，绝不能并进 `qwen3-8-flash`。
-     *
-     * ## ⚠️⚠️ 索引键是 **accio 的对外 id（slug）**，不是上游 `modelCode`
-     *
-     * 补丁按 `realId` 查，而 `realId` 来自 `ctx.llm.listModels(provider)` 返回的
-     * **`id`**。自 2026-10-13 起 accio 的对外 id 改成了 slug
-     * （`accio-adapter.ts` 的 `accioModelIdOf`，为的是让模型能自报人话）⇒
-     * **本表必须跟着改用 slug 索引**。
-     *
-     * ⚠️ 这是一条**静默的连带失效**：若仍按 `1Drift-F8hS3mK7pL2n` 索引，
-     * 查表恒不命中 ⇒ accio 掉回 `qwen-3-8-flash` 孤例键 ⇒
-     * **聚合的轮换列表里又看不到它了**（正是加这条补丁要解决的症状），
-     * 且不会有任何报错。
-     */
-    accio: Object.freeze({
-      // 对外 id（`normalizeNameKey('Qwen 3.8 Flash')`）→ 三家在用的既有规范键。
-      'qwen-3-8-flash': 'qwen3-8-flash',
-    }),
-    /**
-     * Magicrew（超级麦吉国内站，2026-10-29，参与聚合）。
-     *
-     * ⚠️ **只有一条**，成因与 accio **相反**（那边是「展示名有空格」，这边是
-     * 「**上游 id 自带连字符**」）：magicrew 走默认的 `id` 通道，而它的 id 是
-     * `qwen-3.8-flash`（**带**连字符）⇒ `normalizeModelKey` 只转点号 ⇒
-     * 得 `qwen-3-8-flash`；而 loomy / trae / qoder 的 id 是 `qwen3.8-flash`
-     *（**不带**）⇒ 得 `qwen3-8-flash`。
-     *
-     * ⇒ **同一模型两个键** ⇒ 被拆成两个虚拟模型 ⇒ 用户在聚合的
-     * 「Qwen3.8-Flash 轮换列表」里**看不到 magicrew**（症状**静默**：它只是
-     * 不在候选表里）。与 accio 那条同因同形，只是成因反过来。
-     *
-     * ⚠️ 其余 26 个**不登记**：它们的键本来就与既有渠道一致（已逐个跑过
-     * `normalizeModelKey` / `canonicalKeyFor`，`via` 全是 `id` 且键与 buddy 等家
-     * 逐字相同），加补丁是多此一举，且会遮住将来真实的对不上。
-     */
-    magicrew: MAGICREW_CANONICAL_OVERRIDES,
-    /**
-     * **MagiCrew 国际站**（`magicrewintl`，2026-11-01）。
-     *
-     * ⚠️⚠️ 必须**与国内站逐个相同**，且必须**单独登记**（不能指望某种继承）：
-     * 两个 provider 共用同一份 `MAGICREW_FALLBACK_MODELS`（`magicrew-product.ts`
-     * 里 `qwen-3.8-flash` 那条 id **带连字符**），漏登记的症状与 `accio` 那次
-     * 完全同型且**静默**：`canonicalKeyFor('magicrewintl','qwen-3.8-flash',…)`
-     * 走 `via: 'id'` 得到 `qwen3-8-flash` 之外的另一个键 ⇒ 国际站自成一个孤立的
-     * 虚拟模型 ⇒ 聚合的「Qwen3.8-Flash 轮换列表」里**永远没有国际站**，
-     * 且模型选择器里 qwen3.8-flash 相关会出现两条。零报错、零日志。
-     *
-     * ⇒ 两站共用同一个常量对象（上面那个 `MAGICREW_CANONICAL_OVERRIDES`），
-     *   这样「加一条补丁只改一处」—— 复制两份必然漂移。
-     */
-    magicrewintl: MAGICREW_CANONICAL_OVERRIDES,
-    /**
-     * **AutoClaw（智谱）** —— 它的模型 id **带渠道前缀**，于是同一模型被拆成两条。
-     *
-     * ## 实测（2026-11-16，用户实例的 `/v1/models` 全量目录）
-     *
-     * | autoclaw 的 id | 展示名 | 其他渠道的键 |
-     * | --- | --- | --- |
-     * | `zai_glm-5.3-flash` | `GLM-5.3 Flash (AutoClaw)` | `glm-5-3-flash`（buddy / codearts / workbuddy / zcode **4 家静态可证**） |
-     * | `zaicoding_glm-5.3` | `GLM-5.3 (AutoClaw)` | `glm-5-3`（同上 4 家） |
-     *
-     * ⚠️ 别写「6 家」：`opencode` 的**静态** id 是 `glm-5.3-flash-free`
-     * （`src/opencode-product.ts:156`），`normalizeModelKey` 只剥 `/:free$/`、
-     * `-free` 后缀**不剥** ⇒ 它的键是 `glm-5-3-flash-free`（**不同键**）；
-     * `trae` 的静态兜底表只有 `glm-5.2` / `glm-5-turbo` / `glm-5`
-     * （`src/trae-product.ts:235-237`），`glm-5.3` 只能来自远端目录。
-     * ⇒ 「4 家静态可证 + trae / opencode 依赖远端目录」才是可复核的表述
-     * （2026-11-16 正向审计 P3-1 实测）。
-     *
-     * `normalizeModelKey` 只剥命名空间前缀（最后一个 `/` 之前）与 `sn-`，
-     * **不剥 `zai_` / `zaicoding_`** ⇒ 键里留着前缀 ⇒ 聚合里出现
-     * `aggregate/zai_glm-5-3-flash` 与 `aggregate/glm-5-3-flash` 两条**同模型**
-     * 虚拟模型，autoclaw 也不在那 6 家的轮换候选里（症状静默：只是不在列表里）。
-     *
-     * ⚠️ **不做「通用剥前缀」**：`zai_` 只是这一家的写法，把它写成通用规则
-     * （例如「剥掉第一个 `_` 之前」）会误伤真实带下划线的 id —— 实测目录里就有
-     * `modelscope:OpenGVLab/InternVL3_5-241B-A28B`（下划线是模型名的一部分）。
-     * 与 qoder / accio / magicrew 同一条规矩：**逐条登记、每条有实测依据**。
-     */
-    autoclaw: AUTOCLAW_CANONICAL_OVERRIDES,
-    /**
-     * **AutoClaw 国际站**（`autoclawintl`）。
-     *
-     * ⚠️⚠️ 必须**与国内站逐个相同**，且必须**单独登记**（不能指望某种继承）：
-     * 两站的 `fallbackModels` 是同一个 `AUTOCLAW_FALLBACK_MODELS`
-     * （`src/autoclaw-product.ts:399` / `:430`，`:404-406` 注释明写「逐字节相同」），
-     * 漏登记的症状 = 国际站每条模型都退化成 `via: 'id'` 的带前缀键 ⇒ 自成一个
-     * **只有一个候选**的孤立虚拟模型 ⇒ 聚合的「GLM-5.3-Flash 轮换列表」里
-     * **永远没有国际站**，同时候选表里同一模型出现两条。零报错、零日志。
-     * 与 `magicrewintl` 那次（`MAGICREW_CANONICAL_OVERRIDES`）同因同形。
-     *
-     * ⇒ 两站共用同一个常量对象，这样「加一条补丁只改一处」—— 复制两份必然漂移。
-     */
-    autoclawintl: AUTOCLAW_CANONICAL_OVERRIDES,
-    /**
-     * **DeepSeek 的日期快照后缀**（`-1017` / `-0813`）—— 归到对应的无后缀键。
-     *
-     * ## 实测（2026-11-16，直接打真实上游，不是看名字猜的）
-     *
-     * | id | 结果 |
-     * | --- | --- |
-     * | `modelscope/deepseek-ai/DeepSeek-V4.1-Flash` | ❌ 502 ← 上游 400 `Model id : …, has no provider supported`（**已下线**，两次复测一致） |
-     * | `modelscope/deepseek-ai/DeepSeek-V4.1-Flash-1017` | ✅ 200 |
-     * | `modelscope/deepseek-ai/DeepSeek-V4-Pro` | ❌ 502 ← 同上（**已下线**） |
-     * | `modelscope/deepseek-ai/DeepSeek-V4-Pro-0813` | ✅ 200 |
-     * | `codearts/deepseek-v4.1-flash` / `…-1017` | ✅ 两个都 200（是两个独立条目，倍率 x0.09 / x0.12） |
-     *
-     * ⇒ 两件不同的事，别混：
-     *
-     * 1. **「无后缀 vs 后缀」不是等价关系** —— modelscope 上无后缀已下线、后缀在服务；
-     *    codearts 上两者并存（`models.ts` 记的是「上游并存的旧版与新版」，曾因去重把
-     *    `-1017` 静默吞掉）；`llm-adapter.ts` 另有实测：codearts 的 `-0731` / `-0813`
-     *    属 **benefit 组**（需 `maas_type: benefit`），与无后缀「不能互相替代」。
-     *    ⚠️ 所以**不要**在注释/PR 里写「两者是同一个 id」—— 它们是两个 id、两段生命周期。
-     * 2. **后缀那条才是该渠道当前在服务的那个模型** —— modelscope 上根本没有可用的
-     *    无后缀 V4-Pro / V4.1-Flash。不并的后果很具体：主行
-     *    `aggregate/deepseek-v4-pro` 里挂着一个**必然 400** 的 modelscope 无后缀 id，
-     *    而真正能用的 `-0813` 孤零零单独成列（只有 1 个候选）⇒ 用户选「DeepSeek V4 Pro」
-     *    时反而轮换不到魔搭。这正是用户报障「同一个模型被拆成不同模型」的成因。
-     *
-     * ## ⚠️ 合并的代价（写在这里，别以后再当 bug 查一遍）
-     *
-     * - 轮换可能选中**旧 build**（codearts 上 `-1017` 与无后缀并存）；
-     * - codearts 的 `-0813` 走 benefit 计费桶。**不会发错 header** —— `benefitIds` 按
-     *   原始 realId 记账（`models.ts` 的 `benefitIds` 收集处），合并只改虚拟模型归组；
-     * - 上游若把无后缀 id 重新上线并换成更新的 build，这条补丁要重看。
-     *
-     * ⚠️ 也**不要**推广成「剥 `-NNNN`」的通用规则：同目录里
-     * `trae:Doubao-Seed-2.1-Pro`（展示名 `Seed-2.1-Pro-0915`）、
-     * `mistral-large-instruct-2407`、`xiyansql-qwencoder-32b-2412/2504` 的数字都是
-     * **模型名本体或独立型号**，剥了就错并。逐条登记是刻意的。
-     */
-    codearts: Object.freeze({
-      'deepseek-v4.1-flash-1017': 'deepseek-v4-1-flash',
-    }),
-    // ⚠️ modelscope 的 id **带命名空间**（`deepseek-ai/…`）。补丁查找**先**按 `realId`
-    //    原文精确匹配（`Object.hasOwn(providerPatch, realId)`），**再**按归一化后的
-    //    `idKey` 兜底（PR #89 D 域：两条口径同源，否则上游换个书写形态就静默退回孤立键）
-    //    ⇒ 写全命名空间是**正确做法**（原文即命中），但不再是唯一能命中的写法。
-    modelscope: Object.freeze({
-      'deepseek-ai/DeepSeek-V4.1-Flash-1017': 'deepseek-v4-1-flash',
-      'deepseek-ai/DeepSeek-V4-Pro-0813': 'deepseek-v4-pro',
-    }),
-  })
-
-/**
- * 型号统一表（2026-11-16，规格 `docs/superpowers/specs/2026-11-16-canonical-unify-design.md`）。
- *
- * ## 它解决什么
- * 同一型号在各渠道的**写法变体**（连字符有无、`-free`、日期快照、`-official`、代际）
- * 会归一成不同的键，于是聚合里同一模型出现多条。本表在 `canonicalKeyFor` 算出规范键
- * **之后**再查一次，命中即收敛到通用型号键。
- *
- * ## ⚠️ DeepSeek Flash 刻意**跨代际合并**（用户 2026-11-16 定案）
- *
- * 用户原话：「我放出来的 DeepSeek 都是我精选过的，都可以统一成一个 `deepseek-flash`；
- * 不管它之前叫啥」。⇒ `V4 Flash` / `V4.1 Flash` / `-1017` / `-0731` / `-official`
- * 全部并入**一个** `deepseek-flash`，轮换池因此跨代际。
- *
- * ⚠️ **代价（用户已知并接受）**：轮换按「积分最快作废」挑候选，**不按代际** ⇒
- * 落到旧一代（V4）也是可能的。要排除旧一代，把对应渠道的该模型关掉即可。
- * ⚠️ 这条**推翻了本文件原有的「R1：v4.1 与 v4 不合并」红线**（测试已如实改写，
- * 不再是静默漂移）。红线只剩「Flash 与 Pro 绝不互并」。
- *
- * ## ⚠️ 与 GLM / Qwen 的粒度**不同**（刻意的，别为「统一」抹平）
- *
- * 用户对 GLM 的诉求是「5.3 与 5.3-Flash **两个都显示**」⇒ 那两个仍各成一条；
- * 只有 DeepSeek Flash 这一族被要求合并到单条。
- *
- * ## 三条不变的铁律
- * 1. **不同档位绝不互并**：`deepseek-flash` 不含任何 `pro`，`glm-5-3` 不吸
- *    `glm-5-3-flash`，`minimax-m3` 不吸 `minimax-m3-1-flash`（pattern 全部锚定）。
- * 2. **区域通道不并**：`-sg` 是另一条区域链路（workbuddy 新加坡），保留独立键。
- * 3. **认不出的不猜**：字面不含型号 token 的机器代号只能靠下方 EXACT 逐条登记，
- *    未登记的保留独立键（宁可拆开也不误并）。
- *
- * ## `via` 归属
- * pattern 命中**保持原通道**（id/name/patch）—— 这是确定性归一，不新增 `⚠️补丁` 标记；
- * 只有下方 `CANONICAL_UNIFY_EXACT`（机器代号，键被改写）才标 `via: 'patch'`。
- */
-interface CanonicalUnifyRule {
-  /** 统一后的规范键（= 对外 modelId）。 */
+export interface ModelIdentityRule {
+  /** 规范键（= 对外 modelId）。 */
   key: string
-  /** 官方展示名（同时登记进 {@link CANONICAL_NAMES}）。 */
+  /** 官方展示名。 */
   name: string
-  /** 作用在**归一化后**的键上的正则（小写、点→连字符；见 normalizeModelKey）。 */
-  pattern: RegExp
+  /**
+   * 匹配规则（**任一**命中即归入本键）。省略 ⇒ 本行**只登记展示名**、
+   * 不参与合并（例如 `kimi-k3` 这类键本来就唯一的模型）。
+   */
+  match?: {
+    /**
+     * 作用在**归一化后**的键上的正则（`normalizeModelKey` 的产物）。
+     * 用于写法变体与「同档跨代际合并」。
+     * ⚠️ 必须锚定（`^…$`），否则 `glm-5-3` 会吸走 `glm-5-3-flash`。
+     */
+    pattern?: RegExp
+    /**
+     * 字面 id（比较时两边都过 `normalizeModelKey`）。
+     * 用于**机器代号**（`xopglm52`）与**渠道前缀写法**（`zai_glm-5.3-flash`）：
+     * 它们与型号名没有字面关系，正则匹配不到。
+     */
+    ids?: readonly string[]
+  }
 }
 
-const CANONICAL_UNIFY_RULES: readonly CanonicalUnifyRule[] = Object.freeze([
-  // ⚠️ DeepSeek Flash 一族（跨代际合并，见上方长注释）。
-  //    有序：更具体的 flash 规则必须排在 pro 之外互不重叠，故两条顺序无关。
+/**
+ * **内置模型身份表**（随插件发布，只读）。
+ *
+ * ## 怎么加一行
+ *
+ * ```ts
+ * { key: 'glm-5-4', name: 'GLM-5.4', match: { pattern: /^glm-5-4(-free)?$/ } }
+ * ```
+ *
+ * - 想让它**跨代际合并**进已有条目 ⇒ 把已有条目的 pattern 放宽
+ *   （例如 `^glm-5-[34]-flash(-free)?$`）；
+ * - 字面认不出的机器代号 ⇒ 写进 `ids`；
+ * - 只想要好看的展示名、不合并 ⇒ 只写 `key` + `name`（不写 `match`）。
+ *
+ * ## 现有条目的两类性质（务必区分，别把「策略」当 bug 修）
+ *
+ * | 性质 | 依据 | 例子 |
+ * |---|---|---|
+ * | **同一身份** | 上游事实：同一模型的两种写法 | `glm-5.3-flash` ↔ `GLM-5.3-Flash` |
+ * | **用户策略** | 用户偏好：认为可互换、不想挑 | **`deepseek-flash`（V4 与 V4.1 合并）** |
+ *
+ * ⚠️⚠️ **`deepseek-flash` 的跨代际合并是用户 2026-11-16 的明确要求**，不是缺陷：
+ * 原话「我放出来的 DeepSeek 都是我精选过的，都可以统一成一个，不管它之前叫啥」。
+ * 代价（已接受）：轮换按「积分最快作废」挑候选、不按代际，可能落到旧一代。
+ * **不要**把它拆回 `deepseek-v4-flash` / `deepseek-v4-1-flash` 两条 ——
+ * 那会让用户的选择器从 1 条变回 7 条，且没有任何报错。
+ */
+const BUILTIN_MODEL_IDENTITIES: readonly ModelIdentityRule[] = Object.freeze([
+  // ── DeepSeek ──
+  // Flash 一族：跨代际合并（用户策略，见上方长注释）。含日期快照 / -official / -free。
   {
     key: 'deepseek-flash',
     name: 'DeepSeek Flash',
-    pattern: /^deepseek-(v4-1-|v4-)?flash(-[0-9]{4}|-official)?(-free)?$/,
+    match: {
+      pattern: /^deepseek-(v4-1-|v4-)?flash(-[0-9]{4}|-official)?(-free)?$/,
+      // 讯飞 AStudio 的机器代号（真网实测 display_name = DeepSeek-V4.1-Flash）。
+      ids: ['xopdsv4flash0731in', 'xdeepseek-flash-in'],
+    },
   },
+  // Pro 自成一条（与 Flash 绝不互并）。
   {
     key: 'deepseek-v4-pro',
     name: 'DeepSeek V4 Pro',
-    pattern: /^deepseek-(v4-1-|v4-)?pro(-[0-9]{4}|-official)?(-free)?$/,
+    match: {
+      pattern: /^deepseek-(v4-1-|v4-)?pro(-[0-9]{4}|-official)?(-free)?$/,
+      ids: ['xopdeepseekv4pro0813'],
+    },
   },
-  { key: 'glm-5-3-flash', name: 'GLM-5.3-Flash', pattern: /^glm-5-3-flash(-free)?$/ },
-  { key: 'glm-5-3', name: 'GLM-5.3', pattern: /^glm-5-3(-free)?$/ },
-  { key: 'glm-5-2', name: 'GLM-5.2', pattern: /^glm-5-2(-free)?$/ },
-  { key: 'glm-5-1', name: 'GLM-5.1', pattern: /^glm-5-1(-free)?$/ },
-  { key: 'glm-5', name: 'GLM-5', pattern: /^glm-5(-free)?$/ },
-  { key: 'minimax-m3-1-flash', name: 'MiniMax-M3.1-Flash', pattern: /^minimax-m3-1-flash(-free)?$/ },
-  { key: 'minimax-m3', name: 'MiniMax-M3', pattern: /^minimax-m3(-free)?$/ },
-  { key: 'minimax-m2-7', name: 'MiniMax-M2.7', pattern: /^minimax-m2-7(-free)?$/ },
-  { key: 'qwen4-max', name: 'Qwen4-Max', pattern: /^qwen-?4-max(-free)?$/ },
-  { key: 'qwen3-8-flash', name: 'Qwen3.8-Flash', pattern: /^qwen-?3-8-flash(-free)?$/ },
-  { key: 'qwen3-8-max', name: 'Qwen3.8-Max', pattern: /^qwen-?3-8-max(-free)?$/ },
-  { key: 'qwen3-7-max', name: 'Qwen3.7-Max', pattern: /^qwen-?3-7-max(-free)?$/ },
-  { key: 'qwen3-7-plus', name: 'Qwen3.7-Plus', pattern: /^qwen-?3-7-plus(-free)?$/ },
-  { key: 'qwen3-7-flash', name: 'Qwen3.7-Flash', pattern: /^qwen-?3-7-flash(-free)?$/ },
-  { key: 'qwen3-6-plus', name: 'Qwen3.6-Plus', pattern: /^qwen-?3-6-plus(-free)?$/ },
+
+  // ── GLM ──
+  // 每个版本各一条（用户明确要 5.3 与 5.3-Flash **都显示**，不合并）。
+  {
+    key: 'glm-5-3-flash',
+    name: 'GLM-5.3-Flash',
+    match: {
+      pattern: /^glm-5-3-flash(-free)?$/,
+      // AutoClaw 的 id 带渠道前缀（`zai_` / `zaicoding_`），正则匹配不到。
+      ids: ['zai_glm-5.3-flash'],
+    },
+  },
+  {
+    key: 'glm-5-3',
+    name: 'GLM-5.3',
+    match: { pattern: /^glm-5-3(-free)?$/, ids: ['zaicoding_glm-5.3'] },
+  },
+  { key: 'glm-5-2', name: 'GLM-5.2', match: { pattern: /^glm-5-2(-free)?$/, ids: ['xopglm52'] } },
+  { key: 'glm-5-1', name: 'GLM-5.1', match: { pattern: /^glm-5-1(-free)?$/ } },
+  { key: 'glm-5', name: 'GLM-5', match: { pattern: /^glm-5(-free)?$/ } },
+  { key: 'glm-5v-turbo', name: 'GLM-5V-Turbo' },
+
+  // ── MiniMax ──
+  { key: 'minimax-m3-1-flash', name: 'MiniMax-M3.1-Flash', match: { pattern: /^minimax-m3-1-flash(-free)?$/ } },
+  { key: 'minimax-m3', name: 'MiniMax-M3', match: { pattern: /^minimax-m3(-free)?$/ } },
+  { key: 'minimax-m2-7', name: 'MiniMax-M2.7', match: { pattern: /^minimax-m2-7(-free)?$/ } },
+  { key: 'minimax-m2-7-highspeed', name: 'MiniMax-M2.7-highspeed' },
+
+  // ── Qwen ──
+  // ⚠️ `qwen-?` 两种连接写法都收：不同渠道一个写 `qwen3.8-flash`、另一个写
+  //    `qwen-3.8-flash`，归一后只差一个连字符（同一模型的两种写法）。
+  { key: 'qwen4-max', name: 'Qwen4-Max', match: { pattern: /^qwen-?4-max(-free)?$/ } },
+  { key: 'qwen3-8-flash', name: 'Qwen3.8-Flash', match: { pattern: /^qwen-?3-8-flash(-free)?$/ } },
+  { key: 'qwen3-8-max', name: 'Qwen3.8-Max', match: { pattern: /^qwen-?3-8-max(-free)?$/ } },
+  { key: 'qwen3-7-max', name: 'Qwen3.7-Max', match: { pattern: /^qwen-?3-7-max(-free)?$/ } },
+  { key: 'qwen3-7-plus', name: 'Qwen3.7-Plus', match: { pattern: /^qwen-?3-7-plus(-free)?$/ } },
+  { key: 'qwen3-7-flash', name: 'Qwen3.7-Flash', match: { pattern: /^qwen-?3-7-flash(-free)?$/ } },
+  { key: 'qwen3-6-plus', name: 'Qwen3.6-Plus', match: { pattern: /^qwen-?3-6-plus(-free)?$/ } },
+  { key: 'qwen3-5-plus-2026-04-20', name: 'Qwen3.5-Plus-2026-04-20' },
+
+  // ── Kimi ──
+  { key: 'kimi-k3', name: 'Kimi-K3' },
+  { key: 'kimi-k3-1', name: 'Kimi-K3-1' },
+  { key: 'kimi-k2-8-preview', name: 'Kimi-K2.8-Preview' },
+  { key: 'kimi-k2-7', name: 'Kimi-K2.7' },
+  { key: 'kimi-k2-7-code', name: 'Kimi-K2.7-Code' },
+  { key: 'kimi-k2-7-code-highspeed', name: 'Kimi-K2.7-Code-Highspeed' },
+  { key: 'kimi-k2-6', name: 'Kimi-K2.6' },
+  { key: 'kimi-k2-5', name: 'Kimi-K2.5' },
+
+  // ── Gemini ──
+  { key: 'gemini-3-8-flash', name: 'Gemini 3.8 Flash' },
+  { key: 'gemini-3-5-flash', name: 'Gemini 3.5 Flash' },
+
+  // ── 其它 ──
+  { key: 'hy4-preview', name: 'Hy4 Preview' },
+  { key: 'hy3', name: 'Hy3' },
+  { key: 'hy3-x', name: 'Hy3 X' },
+  { key: 'sensenova-6-8-flash', name: 'SenseNova-6.8-Flash' },
+  { key: 'sensenova-6-8-flash-lite', name: 'SenseNova-6.8-Flash-Lite' },
+  { key: 'doubao-seed-2-1-pro-260628', name: 'Doubao Seed 2.1 Pro' },
+  { key: 'doubao-seed-2-1-turbo-260628', name: 'Doubao Seed 2.1 Turbo' },
+  { key: 'doubao-seed-2-0-code-preview-260215', name: 'Doubao Seed 2.0 Code Preview' },
+  // AutoClaw 自带的两条 Auto（上游真实模型，不是我们的抽象入口）。
+  { key: 'zai_auto', name: 'Auto (AutoClaw)' },
+  { key: 'zai_auto-fast', name: 'Auto-Fast (AutoClaw)' },
 ])
 
 /**
- * 机器代号 → 统一键（字面不含型号 token，正则匹配不到，只能逐条登记）。
+ * 用户层规则（来自 `~/.dsh/jet-hub/model-aliases.json`，由接线层注入）。
  *
- * 全部出自**真实目录实测**（不是看名字猜的）：
- * - 讯飞 AStudio：`docs/agent-notes/providers-astudio.md` §1 真网实测表（7 个目录模型
- *   逐个发 `/responses` 均 200，显示名与型号一一对应）；
- * - `xdeepseek-flash-in` 是本机网关**重启后实测目录**里 astudio 新下发的代号，
- *   该账号目录的 `display_name` 为 `DeepSeek-V4.1-Flash`（2026-11-16 实读）。
- *
- * ⚠️ 用户原话「有些厂商的它就不叫 DeepSeek，那个你得自己处理」正是指这一类。
- * ⚠️ 未登记的代号保留独立键（不猜）；发现新的先取到**展示名**再登记。
- * 命中 ⇒ `via: 'patch'`（面板标 `⚠️补丁` 供人工核查）。
+ * ⚠️ **用户层优先命中**：它排在 {@link BUILTIN_MODEL_IDENTITIES} 之前参与匹配，
+ * 因此既能**追加**新模型，也能**覆盖**内置条目的匹配范围（例如把 GLM 的 pattern
+ * 放宽成跨版本合并）。
+ * ⚠️ 本模块**不做 IO**（保持纯函数、可单测）；读文件与校验是调用方的事。
  */
-const CANONICAL_UNIFY_EXACT: Readonly<Record<string, string>> = Object.freeze({
-  // 讯飞 AStudio（机器代号 → 型号，逐条实测）
-  xopglm52: 'glm-5-2',
-  xopdeepseekv4pro0813: 'deepseek-v4-pro',
-  xopdsv4flash0731in: 'deepseek-flash',
-  'xdeepseek-flash-in': 'deepseek-flash',
-})
+let userIdentities: readonly ModelIdentityRule[] = Object.freeze([])
 
-/**
- * 该键是否是型号统一表的**目标键**（统一条目）。
- *
- * 请求路径据此分支：统一条目无思考选择器、建池放宽 default-rejected、选序不截断、
- * 转发恒顶格（见 `aggregate-adapter.ts`）。判据**只留这一处**，适配器只 import。
- *
- * ⚠️ 用数组 `.some` 精确比 `key`，不用 `in`/原型链查表（表是数组，无原型链键问题；
- * 但 `constructor` 等输入仍必须返回 false —— `.some` 天然满足）。
- */
+/** 注入用户层规则（覆盖式：传空数组即清除）。 */
+export function setUserModelIdentities(rules: readonly ModelIdentityRule[]): void {
+  userIdentities = Object.freeze([...rules])
+}
+
+/** 当前生效的全部规则（用户层在前）。 */
+function allIdentities(): readonly ModelIdentityRule[] {
+  return userIdentities.length === 0
+    ? BUILTIN_MODEL_IDENTITIES
+    : [...userIdentities, ...BUILTIN_MODEL_IDENTITIES]
+}
+
+/** 该键是否是「合并型」条目（有 match ⇒ 会把多条候选并进来）。 */
 export function isUnifiedKey(key: string): boolean {
-  return CANONICAL_UNIFY_RULES.some((rule) => rule.key === key)
+  return allIdentities().some((rule) => rule.key === key && rule.match !== undefined)
+}
+
+/** 按字面 id 匹配（两边都归一化）。 */
+function ruleMatchesId(rule: ModelIdentityRule, idKey: string): boolean {
+  const ids = rule.match?.ids
+  if (ids === undefined || ids.length === 0) return false
+  for (const id of ids) {
+    if (normalizeModelKey(id) === idKey) return true
+  }
+  return false
 }
 
 /**
  * 一个候选条目归入哪个规范键。
  *
  * 顺序（**不可调换**）：
- * 1. **排除集**（查 `realId`、`idKey`、**以及 `nameKey`**，见下）→ `undefined`；
- * 2. **显式补丁** → 补丁值（最高优先：它是人工实测结论，胜过任何推导）；
- * 3. **主通道**（`channelOf`）→ 归一化结果；
- * 4. 主通道算出的键与 realId 完全一致**且** provider 声明的是 `name` 通道时，
- *    说明 name 通道没提供信息 → 回落 id 通道。
+ * 1. **排除集**（查 `realId` / `idKey` / `nameKey`，见下）→ `undefined`；
+ * 2. **字面 id 命中**（表里的 `ids`）→ `via: 'patch'`（人工逐条登记，面板标 ⚠️补丁）；
+ * 3. **主通道**（`channelOf`）算出候选键，再查表里的 `pattern` → 保持原通道；
+ * 4. 都没命中 ⇒ 原样返回主通道键（**不猜、不合并**）。
  *
- * ## ⚠️ 排除集必须查**三条**候选键，不能只查 id
+ * ## ⚠️ 排除集必须查三条候选键，不能只查 id
  *
  * 初版只查 `realId` / `idKey`。但 `name` 通道的 provider 可以用**展示名**算出键
  * —— 若某条目的展示名归一后落在排除集里（如展示名就叫 `Auto`）而它的 id 不是
- * `auto`，初版会**放行**它，于是产出一个 `key === 'auto'` 的虚拟模型，与
- * `AGGREGATE_AUTO_MODEL` **撞名**：用户会在模型选择器里看到两个 `auto`，
- * 且 DSH 的 `listModels` 会因 **id 重复**抛 `INVALID_CATALOG`（整个聚合 provider
- * 的目录直接不可用）。
- *
- * ⇒ 排除判定必须在**算出键之后**再做一次，而不是只看 id。
- * ⚠️ qoder 的 `auto` 恰好 `realId === 'auto'`，所以初版能挡住它 —— **这不代表
- * 初版是对的**：挡住它靠的是巧合（id 与展示名同形），换个 id 就漏。
+ * `auto`，初版会**放行**它 ⇒ 产出一个 `key === 'auto'` 的虚拟模型，与
+ * `AGGREGATE_AUTO_MODEL` 撞名 ⇒ DSH 的 `listModels` 因 **id 重复**抛
+ * `INVALID_CATALOG`（整个聚合目录直接不可用）。
+ * ⇒ 排除判定必须在**算出键之后**再做一次。
  *
  * @returns `via` 标明归属来源，供面板标注 `⚠️补丁`（人工核查用）。
  */
@@ -567,154 +339,50 @@ export function canonicalKeyFor(
   const idKey = normalizeModelKey(realId)
   if (EXCLUDED_ALIASES.has(realId) || EXCLUDED_ALIASES.has(idKey)) return undefined
 
-  // ⚠️ **必须用 `Object.hasOwn` 收窄**（真实缺陷，全分支终审 M9）：这两张表都是
-  // 普通对象字面量 ⇒ 原型链上可命中 `constructor` / `toString` / `valueOf` /
-  // `hasOwnProperty` / `__proto__` 等键。实测 `CANONICAL_NAMES['constructor']` 返回
-  // **`Object` 构造函数**（不是字符串、也不是 `undefined`）⇒ `canonicalDisplayName`
-  // 会把它当展示名返回 ⇒ DSH 的 `listModels` 校验要求 `name` 是**非空字符串**
-  //（`dsh-llm/lib/index.js`：`typeof model.name !== 'string'` ⇒ 抛
-  // `INVALID_CATALOG`）⇒ **整个聚合目录不可用**。
-  //
-  // 可达性说明（为什么仍要修）：`provider` 来自 `ctx.llm.listProviders()` 且我们已
-  // 用白名单收窄（全是本插件内部常量），模型 id 则来自各渠道 `listModels()` ——
-  // 其中 `cline` 会透传远端 id，是唯一的注入面。远端给出 `constructor` 这种 id 的
-  // 概率极低，但**后果是全局的、修法是一行**，故按「宁可多一道闸」处理。
-  const providerPatch = Object.hasOwn(CANONICAL_OVERRIDES, provider)
-    ? CANONICAL_OVERRIDES[provider]
-    : undefined
-  // ⚠️⚠️ 补丁查找必须**两条口径都查**（2026-11-16 对抗审计 D 域实测的「漏并 5 格」）：
-  // 排除集查的是 `realId` **和** `idKey`（归一化后），而这里原先**只查 raw `realId`**
-  // ⇒ 同一函数两套口径。上游只要换个书写形态就静默退回带前缀的孤立键：
-  //
-  // | 上游给的 realId | 只查 raw `realId` | 期望 |
-  // | --- | --- | --- |
-  // | `ZAI_GLM-5.3-FLASH`（全大写） | 查不到 ⇒ 孤立键 | `glm-5-3-flash` |
-  // | `zai_glm-5.3-flash:free`（带 `:free`） | 查不到 ⇒ 孤立键 | `glm-5-3-flash` |
-  // | `zai_glm-5.3-flash `（尾空格） | 查不到 ⇒ 孤立键 | `glm-5-3-flash` |
-  // | `ZAICODING_GLM-5.3` | 查不到 ⇒ 孤立键 | `glm-5-3` |
-  //
-  // 症状与「漏登记国际站」**完全同型且静默**（自成一个只有一个候选的虚拟模型、
-  // 轮换列表里永远看不到它）。`normalizeModelKey` 已经处理了大写/空格/`:free`，
-  // 所以只要把两侧都归一化再比一次即可 —— 补丁表很短（个位数），线性扫描无成本。
-  const patched = providerPatch === undefined
-    ? undefined
-    : Object.hasOwn(providerPatch, realId)
-      ? providerPatch[realId]
-      : Object.entries(providerPatch).find(([patchId]) => normalizeModelKey(patchId) === idKey)?.[1]
-  // ⚠️ 补丁命中**不在这里返回** —— 它的产物也要过型号统一表（见下方 `resolved`）。
+  const rules = allIdentities()
 
+  // ② 字面 id（机器代号 / 渠道前缀写法）：与型号名无字面关系，只能逐条登记。
+  for (const rule of rules) {
+    if (!ruleMatchesId(rule, idKey)) continue
+    return EXCLUDED_ALIASES.has(rule.key) ? undefined : { key: rule.key, via: 'patch' }
+  }
+
+  // ③ 主通道算键 → 查 pattern。
   const nameKey = normalizeNameKey(realName)
-  /**
-   * 先算出候选键与来源，**不立刻返回**。
-   *
-   * ⚠️⚠️ **补丁产物也必须过型号统一表**（2026-11-16 实施时留下的真缺陷，已修）：
-   * 初版在 `patched` 分支里直接 `return`，而 codearts / modelscope / lobsterai /
-   * autoclaw / magicrew / accio 的六个补丁**全部**走那条路 ⇒ 它们绕过统一表，
-   * 症状正是「机器代号并掉了，但 `deepseek-v4-1-flash` 还单独一条」。
-   * ⇒ 两种来源汇成 `resolved` 后统一出口，表只查一次。
-   */
-  let resolved: { key: string; via: 'id' | 'name' | 'patch' }
-  if (patched !== undefined) {
-    // 排除集判定与既有口径一致（补丁值落在排除集 ⇒ 不归入任何虚拟模型）。
-    if (EXCLUDED_ALIASES.has(patched)) return undefined
-    resolved = { key: patched, via: 'patch' }
-  } else {
-    // ⚠️ name 通道算出的键也要过排除集（理由见上方长注释）。
-    const chosen = channelOf(provider) === 'name' && nameKey.length > 0 && nameKey !== idKey
-      ? { key: nameKey, via: 'name' as const }
-      : { key: idKey, via: 'id' as const }
-    if (EXCLUDED_ALIASES.has(chosen.key)) return undefined
-    resolved = chosen
+  const chosen = channelOf(provider) === 'name' && nameKey.length > 0 && nameKey !== idKey
+    ? { key: nameKey, via: 'name' as const }
+    : { key: idKey, via: 'id' as const }
+  if (EXCLUDED_ALIASES.has(chosen.key)) return undefined
+
+  for (const rule of rules) {
+    const pattern = rule.match?.pattern
+    if (pattern === undefined) continue
+    if (!pattern.test(chosen.key)) continue
+    // pattern 命中保持原通道（确定性归一，不新增 `⚠️补丁` 标记）。
+    return EXCLUDED_ALIASES.has(rule.key) ? undefined : { key: rule.key, via: chosen.via }
   }
 
-  // ⚠️ 型号统一表（2026-11-16）：EXACT（机器代号，键被改写 ⇒ via=patch）→
-  //    pattern（写法变体 / 同档代际归并 ⇒ 保持原通道）。
-  if (Object.hasOwn(CANONICAL_UNIFY_EXACT, resolved.key)) {
-    const unified = CANONICAL_UNIFY_EXACT[resolved.key]!
-    return EXCLUDED_ALIASES.has(unified) ? undefined : { key: unified, via: 'patch' }
-  }
-  const rule = CANONICAL_UNIFY_RULES.find((r) => r.pattern.test(resolved.key))
-  if (rule !== undefined) {
-    // pattern 命中保持原通道（确定性归一，不标 ⚠️补丁）；产物仍过排除集。
-    return EXCLUDED_ALIASES.has(rule.key) ? undefined : { key: rule.key, via: resolved.via }
-  }
-  return resolved
+  // ④ 没命中 ⇒ 原样（宁可漏合并，不可错合并）。
+  return chosen
 }
 
 /**
  * 规范键 → **官方展示名**（用户在模型选择器里看到的名字）。
  *
- * ⚠️ 只登记我们**确定**的模型。未登记的回退为键本身（不编造）—— 编造一个
- * 「看起来像官方」的名字比显示裸键更糟：用户无从判断它是不是自己想的那个模型。
- * ⚠️ 展示名**不含倍率**：倍率是**按渠道**不同的运行时信息，写进规范名会让同一
- * 虚拟模型在不同渠道下显示不同名字（与「归一」的目的相反）。
+ * ⚠️ 只登记我们**确定**的模型。未登记的回退为键本身（**不编造**）——
+ * 编造一个「看起来像官方」的名字比显示裸键更糟：用户无从判断它是不是自己
+ * 想的那个模型。
+ * ⚠️ 展示名**不含倍率**：倍率是按渠道不同的运行时信息，写进规范名会让同一虚拟
+ * 模型在不同渠道下显示不同名字（与「归一」的目的相反）。
+ *
+ * ⚠️ **必须用 `Object` 安全的查找**：`BUILTIN_MODEL_IDENTITIES` 是数组，
+ * 用 `.find` 天然没有原型链问题；但**不得**改回对象字面量查表 ——
+ * 那会让 `constructor` 这类键返回 `Object` 构造函数，DSH 校验 name 为字符串时
+ * 抛 `INVALID_CATALOG`（整个聚合目录不可用，本仓库有实测记录）。
  */
-const CANONICAL_NAMES: Readonly<Record<string, string>> = Object.freeze({
-  'deepseek-v4-1-flash': 'DeepSeek V4.1 Flash',
-  'deepseek-v4-flash': 'DeepSeek V4 Flash',
-  'deepseek-v4-flash-0731': 'DeepSeek V4 Flash 0731',
-  'deepseek-v4-pro': 'DeepSeek V4 Pro',
-  'deepseek-flash': 'DeepSeek Flash',
-  'glm-5-3': 'GLM-5.3',
-  'glm-5-3-flash': 'GLM-5.3-Flash',
-  // ⚠️ AutoClaw 的 `zai_auto` / `zai_auto-fast` 走 **id 通道**（`autoclaw` 不在
-  //    `PRIMARY_CHANNEL` 里），它们的 id 带 `zai_` 渠道前缀 ⇒ 不加本条目的话，
-  //    聚合列表里显示的就是 `zai_auto` 这种机器名（与 `GLM-5.3` 并排很突兀，
-  //    那正是 PR #89 初版想解决的现象）。
-  //    这两个名字**取自 autoclaw 自己的 `name`**（`src/autoclaw-product.ts` 的
-  //    `AUTOCLAW_FALLBACK_MODELS`：`Auto (AutoClaw)` / `Auto-Fast (AutoClaw)`），
-  //    是如实转写，不是我们编的；括号后缀是为跨渠道区分（与 qoder / accio 同一惯例）。
-  //    ⚠️ 与聚合自己的 `aggregate/auto` 不会混淆：后者的 key 是 `auto`，显示名由
-  //    `autoModelInfo()` 单独给（`Auto（聚合 · 跨渠道）`），不走本表。
-  'zai_auto': 'Auto (AutoClaw)',
-  'zai_auto-fast': 'Auto-Fast (AutoClaw)',
-  'glm-5-2': 'GLM-5.2',
-  'glm-5-1': 'GLM-5.1',
-  'glm-5': 'GLM-5',
-  'glm-5v-turbo': 'GLM-5V-Turbo',
-  'kimi-k3': 'Kimi-K3',
-  'kimi-k3-1': 'Kimi-K3-1',
-  'kimi-k2-8-preview': 'Kimi-K2.8-Preview',
-  'kimi-k2-7': 'Kimi-K2.7',
-  'kimi-k2-7-code': 'Kimi-K2.7-Code',
-  'kimi-k2-7-code-highspeed': 'Kimi-K2.7-Code-Highspeed',
-  'kimi-k2-6': 'Kimi-K2.6',
-  'kimi-k2-5': 'Kimi-K2.5',
-  'minimax-m3': 'MiniMax-M3',
-  'minimax-m2-7': 'MiniMax-M2.7',
-  'minimax-m2-7-highspeed': 'MiniMax-M2.7-highspeed',
-  'minimax-m3-1-flash-preview': 'MiniMax-M3.1-Flash-Preview',
-  'minimax-m3-1-flash': 'MiniMax-M3.1-Flash',
-  'qwen4-max': 'Qwen4-Max',
-  'qwen3-8-max': 'Qwen3.8-Max',
-  'qwen3-8-flash': 'Qwen3.8-Flash',
-  'qwen3-7-max': 'Qwen3.7-Max',
-  'qwen3-7-plus': 'Qwen3.7-Plus',
-  'qwen3-7-flash': 'Qwen3.7-Flash',
-  'qwen3-6-plus': 'Qwen3.6-Plus',
-  'qwen-3-8-max': 'Qwen 3.8 Max',
-  'qwen-3-7-plus': 'Qwen 3.7 Plus',
-  'qwen3-5-plus-2026-04-20': 'Qwen3.5-Plus-2026-04-20',
-  'gemini-3-8-flash': 'Gemini 3.8 Flash',
-  'gemini-3-5-flash': 'Gemini 3.5 Flash',
-  'hy4-preview': 'Hy4 Preview',
-  'hy3': 'Hy3',
-  'hy3-x': 'Hy3 X',
-  'sensenova-6-8-flash': 'SenseNova-6.8-Flash',
-  'sensenova-6-8-flash-lite': 'SenseNova-6.8-Flash-Lite',
-  'doubao-seed-2-1-pro-260628': 'Doubao Seed 2.1 Pro',
-  'doubao-seed-2-1-turbo-260628': 'Doubao Seed 2.1 Turbo',
-  'doubao-seed-2-0-code-preview-260215': 'Doubao Seed 2.0 Code Preview',
-  'deepseek-v4-flash-official': 'DeepSeek V4 Flash Official',
-})
-
-/** 规范键 → 展示名；未登记的回退为键本身（不编造）。 */
 export function canonicalDisplayName(key: string): string {
-  // ⚠️ **必须用 `Object.hasOwn`**（真实缺陷，全分支终审 M9）：`CANONICAL_NAMES` 是
-  // 普通对象字面量 ⇒ `CANONICAL_NAMES['constructor']` 会沿原型链返回 **`Object`
-  // 构造函数**（不是 `undefined`）⇒ 本函数返回一个**函数对象**而非字符串 ⇒
-  // DSH 的 `listModels` 校验（要求 `name` 是非空字符串）抛 `INVALID_CATALOG`
-  // ⇒ **整个聚合目录不可用**。实测 `typeof canonicalDisplayName('constructor')
-  // === 'function'`。
-  return Object.hasOwn(CANONICAL_NAMES, key) ? CANONICAL_NAMES[key]! : key
+  for (const rule of allIdentities()) {
+    if (rule.key === key) return rule.name
+  }
+  return key
 }

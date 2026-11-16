@@ -162,12 +162,15 @@ describe('buildVirtualModels：排序与容错', () => {
   })
 
   it('`via` 为 `patch` 的候选被透传（三成员联合类型都要覆盖）', () => {
-    // lobsterai 的远端专有 id 经显式补丁归入 deepseek-v4-1-flash。
+    // ⚠️ 2026-11-17 单表重构后：`patch` **只**来自「字面 id 登记」
+    //    （机器代号 / 渠道前缀写法）。lobsterai 的 `deepseek-flash` 已由 pattern
+    //    覆盖（via=id），故本用例改用 autoclaw 的 `zai_` 前缀 id ——
+    //    它与型号名无字面关系，只能逐条登记，正是 patch 语义的唯一去处。
     const models = buildVirtualModels({
-      lobsterai: [{ id: 'deepseek-flash', name: 'DeepSeek-V4.1-Flash' }],
+      autoclaw: [{ id: 'zai_glm-5.3-flash', name: 'GLM-5.3 Flash (AutoClaw)' }],
     })
     expect(models).toHaveLength(1)
-    expect(models[0]!.key).toBe('deepseek-flash')
+    expect(models[0]!.key).toBe('glm-5-3-flash')
     expect(models[0]!.candidates[0]!.via).toBe('patch')
   })
 })

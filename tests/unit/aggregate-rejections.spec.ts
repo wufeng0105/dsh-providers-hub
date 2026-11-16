@@ -444,29 +444,20 @@ describe('★ aggregate.catalog 的组装（只读、零余额查询）', () => 
   it('补丁来源的候选 viaPatch 为 true', async () => {
     // ⚠️ 规格 §7.1 要求面板对补丁条目标 `⚠️补丁` 供人工核查 —— 数据必须来自这里。
     //
-    // ⚠️⚠️ **本用例在「面板过滤未接入候选」修复后必须换测法**（2026-10-07）：
-    //    补丁表 `CANONICAL_OVERRIDES` 目前**只有 lobsterai 一条**，而 lobsterai
-    //    **未接入临期折算** ⇒ 面板现在会把它过滤掉 ⇒ 从 `describeCatalog` 里
-    //    再也拿不到补丁候选。
-    //
-    //    ⇒ 但 `viaPatch` 这条**数据通路**仍然要验证（面板将来接入更多渠道时会用到）。
-    //      改为直接测**归一化层** `buildVirtualModels` —— 那才是补丁生效的地方，
-    //      与「面板显示哪些渠道」是两件独立的事。
-    //
-    //    ⚠️ 顺带记录一个**待决事实**：补丁表唯一的目标渠道（lobsterai）未接入临期折算，
-    //      故这张表**目前在轮换里不起任何作用**，面板上的 `⚠️补丁` 标记也看不到。
-    //      是否给 lobsterai 接入折算由用户决定（见规格 §9.1 的接入清单）。
+    // ⚠️ 2026-11-17 单表重构后：`patch` 只剩**字面 id 登记**这一个来源
+    //    （机器代号 / 渠道前缀写法）。lobsterai 的 `deepseek-flash` 已被 pattern
+    //    覆盖（via=id），故本用例改用 autoclaw 的 `zai_` 前缀 id。
     const virtual = buildVirtualModels({
-      buddy: [{ id: 'deepseek-v4.1-flash', name: 'Deepseek-V4.1-Flash' }],
-      // lobsterai 的 deepseek-flash 靠**显式补丁**归一（id/name 两通道都命中不了）
-      lobsterai: [{ id: 'deepseek-flash', name: 'DeepSeek Flash' }],
+      buddy: [{ id: 'glm-5.3-flash', name: 'GLM-5.3-Flash · x0.15' }],
+      // autoclaw 的 id 带渠道前缀，正则匹配不到 ⇒ 只能靠字面 id 登记（via=patch）
+      autoclaw: [{ id: 'zai_glm-5.3-flash', name: 'GLM-5.3 Flash (AutoClaw)' }],
     })
-    const target = virtual.find((m) => m.key === 'deepseek-flash')
-    expect(target, '补丁应把 lobsterai 的条目归入同一虚拟键').toBeDefined()
+    const target = virtual.find((m) => m.key === 'glm-5-3-flash')
+    expect(target, '字面 id 应把 autoclaw 的条目归入同一虚拟键').toBeDefined()
     const patched = target!.candidates.find((c) => c.via === 'patch')
-    expect(patched, '补丁来源的候选必须被标记（面板据此标 ⚠️补丁）').toBeDefined()
-    expect(patched!.provider).toBe('lobsterai')
-    expect(patched!.realId).toBe('deepseek-flash')
+    expect(patched, '字面 id 来源的候选必须被标记（面板据此标 ⚠️补丁）').toBeDefined()
+    expect(patched!.provider).toBe('autoclaw')
+    expect(patched!.realId).toBe('zai_glm-5.3-flash')
   })
 
   it('★ 只读：describeCatalog 不得改动拒绝表', async () => {
