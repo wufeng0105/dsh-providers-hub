@@ -117,15 +117,15 @@ function makeWorld(qoder: QoderAdapter) {
     accountPool: pool,
     expiryProbe: async () => 100,
     // qoder 未接入临期折算 ⇒ 默认不参与，需显式放行（与面板「打开」同一路径）。
-    allowed: () => ({ 'deepseek-v4-1-flash': { qoder: { 'deepseek-v4.1-flash': true } } }),
+    allowed: () => ({ 'deepseek-flash': { qoder: { 'deepseek-v4.1-flash': true } } }),
     orderMode: () => 'manual',
-    order: () => ({ 'deepseek-v4-1-flash': ['qoder\u0000deepseek-v4.1-flash', 'buddy\u0000deepseek-v4.1-flash'] }),
+    order: () => ({ 'deepseek-flash': ['qoder\u0000deepseek-v4.1-flash', 'buddy\u0000deepseek-v4.1-flash'] }),
   })
   return { adapter, sent }
 }
 
 async function drainText(adapter: AggregateAdapter): Promise<string> {
-  const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+  const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
   let text = ''
   for await (const chunk of call.stream({ messages: MESSAGES } as never)) {
     const c = chunk as { type: string; text?: string }

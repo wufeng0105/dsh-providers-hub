@@ -430,22 +430,35 @@ export const CANONICAL_OVERRIDES: Readonly<Record<string, Readonly<Record<string
  * 型号统一表（2026-11-16，规格 `docs/superpowers/specs/2026-11-16-canonical-unify-design.md`）。
  *
  * ## 它解决什么
- * 同一型号在各渠道的**写法变体**（连字符有无、`-free` 后缀）会归一成不同的键，
- * 于是聚合里同一模型出现多条。本表在 `canonicalKeyFor` 算出规范键**之后**再查一次，
- * 命中即收敛到通用型号键。它是配置表驱动的确定性归一，**不是**人工逐条核查的补丁。
+ * 同一型号在各渠道的**写法变体**（连字符有无、`-free`、日期快照、`-official`、代际）
+ * 会归一成不同的键，于是聚合里同一模型出现多条。本表在 `canonicalKeyFor` 算出规范键
+ * **之后**再查一次，命中即收敛到通用型号键。
  *
- * ## ⚠️ 三条铁律（与 `CANONICAL_OVERRIDES` 同源）
- * 1. **pattern 只收写法变体**（连字符 / `-free`），**绝不写通用日期规则**：
- *    codearts 的 `-0731` 与无后缀 `deepseek-v4-flash` 是后端**不同模型、benefit 属性相反**
- *    （`models.spec.ts` / `models.ts` 实测），通用剥日期会把请求打到错模型。
- *    日期快照（`-1017`/`-0813`）的归并已由上方逐条补丁完成，本表不重复也不推广。
- * 2. **不同型号绝不互并**：pattern 全部锚定（`^…$`），`glm-5-3` 不吸 `glm-5-3-flash`、
- *    `glm-5` 不吸 `glm-5v-turbo`、`minimax-m3` 不吸 `minimax-m3-1-flash`。
- * 3. **未实测的变体不并**：`-preview` / `-official` / `-sg` / 裸 `deepseek-flash`（代际未确认）
- *    一律保留独立键（规格 §5 登记）。宁可拆开也不误并。
+ * ## ⚠️ DeepSeek Flash 刻意**跨代际合并**（用户 2026-11-16 定案）
+ *
+ * 用户原话：「我放出来的 DeepSeek 都是我精选过的，都可以统一成一个 `deepseek-flash`；
+ * 不管它之前叫啥」。⇒ `V4 Flash` / `V4.1 Flash` / `-1017` / `-0731` / `-official`
+ * 全部并入**一个** `deepseek-flash`，轮换池因此跨代际。
+ *
+ * ⚠️ **代价（用户已知并接受）**：轮换按「积分最快作废」挑候选，**不按代际** ⇒
+ * 落到旧一代（V4）也是可能的。要排除旧一代，把对应渠道的该模型关掉即可。
+ * ⚠️ 这条**推翻了本文件原有的「R1：v4.1 与 v4 不合并」红线**（测试已如实改写，
+ * 不再是静默漂移）。红线只剩「Flash 与 Pro 绝不互并」。
+ *
+ * ## ⚠️ 与 GLM / Qwen 的粒度**不同**（刻意的，别为「统一」抹平）
+ *
+ * 用户对 GLM 的诉求是「5.3 与 5.3-Flash **两个都显示**」⇒ 那两个仍各成一条；
+ * 只有 DeepSeek Flash 这一族被要求合并到单条。
+ *
+ * ## 三条不变的铁律
+ * 1. **不同档位绝不互并**：`deepseek-flash` 不含任何 `pro`，`glm-5-3` 不吸
+ *    `glm-5-3-flash`，`minimax-m3` 不吸 `minimax-m3-1-flash`（pattern 全部锚定）。
+ * 2. **区域通道不并**：`-sg` 是另一条区域链路（workbuddy 新加坡），保留独立键。
+ * 3. **认不出的不猜**：字面不含型号 token 的机器代号只能靠下方 EXACT 逐条登记，
+ *    未登记的保留独立键（宁可拆开也不误并）。
  *
  * ## `via` 归属
- * pattern 命中**保持原通道**（id/name）—— 这是确定性归一，不标 `⚠️补丁`；
+ * pattern 命中**保持原通道**（id/name/patch）—— 这是确定性归一，不新增 `⚠️补丁` 标记；
  * 只有下方 `CANONICAL_UNIFY_EXACT`（机器代号，键被改写）才标 `via: 'patch'`。
  */
 interface CanonicalUnifyRule {
@@ -458,9 +471,18 @@ interface CanonicalUnifyRule {
 }
 
 const CANONICAL_UNIFY_RULES: readonly CanonicalUnifyRule[] = Object.freeze([
-  { key: 'deepseek-v4-1-flash', name: 'DeepSeek V4.1 Flash', pattern: /^deepseek-v4-1-flash(-free)?$/ },
-  { key: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', pattern: /^deepseek-v4-flash(-free)?$/ },
-  { key: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', pattern: /^deepseek-v4-pro(-free)?$/ },
+  // ⚠️ DeepSeek Flash 一族（跨代际合并，见上方长注释）。
+  //    有序：更具体的 flash 规则必须排在 pro 之外互不重叠，故两条顺序无关。
+  {
+    key: 'deepseek-flash',
+    name: 'DeepSeek Flash',
+    pattern: /^deepseek-(v4-1-|v4-)?flash(-[0-9]{4}|-official)?(-free)?$/,
+  },
+  {
+    key: 'deepseek-v4-pro',
+    name: 'DeepSeek V4 Pro',
+    pattern: /^deepseek-(v4-1-|v4-)?pro(-[0-9]{4}|-official)?(-free)?$/,
+  },
   { key: 'glm-5-3-flash', name: 'GLM-5.3-Flash', pattern: /^glm-5-3-flash(-free)?$/ },
   { key: 'glm-5-3', name: 'GLM-5.3', pattern: /^glm-5-3(-free)?$/ },
   { key: 'glm-5-2', name: 'GLM-5.2', pattern: /^glm-5-2(-free)?$/ },
@@ -479,20 +501,24 @@ const CANONICAL_UNIFY_RULES: readonly CanonicalUnifyRule[] = Object.freeze([
 ])
 
 /**
- * 机器代号 → 统一键（无法用正则安全匹配的，逐条登记）。
+ * 机器代号 → 统一键（字面不含型号 token，正则匹配不到，只能逐条登记）。
  *
- * 出处：`docs/agent-notes/providers-astudio.md` §1 真网实测表（2026-11-16，
- * 7 个目录模型逐个发 `/responses` 均 200，显示名与型号一一对应）：
- * - `xopglm52` = GLM-5.2；`xopdeepseekv4pro0813` = DeepSeek-V4-Pro；
- * - `xopdsv4flash0731in` = DeepSeek-V4-Flash。
+ * 全部出自**真实目录实测**（不是看名字猜的）：
+ * - 讯飞 AStudio：`docs/agent-notes/providers-astudio.md` §1 真网实测表（7 个目录模型
+ *   逐个发 `/responses` 均 200，显示名与型号一一对应）；
+ * - `xdeepseek-flash-in` 是本机网关**重启后实测目录**里 astudio 新下发的代号，
+ *   该账号目录的 `display_name` 为 `DeepSeek-V4.1-Flash`（2026-11-16 实读）。
  *
- * ⚠️ 这些 id 字面上不含型号 token，正则匹配不到，只能逐条实测登记（仓库铁律：不猜）。
+ * ⚠️ 用户原话「有些厂商的它就不叫 DeepSeek，那个你得自己处理」正是指这一类。
+ * ⚠️ 未登记的代号保留独立键（不猜）；发现新的先取到**展示名**再登记。
  * 命中 ⇒ `via: 'patch'`（面板标 `⚠️补丁` 供人工核查）。
  */
 const CANONICAL_UNIFY_EXACT: Readonly<Record<string, string>> = Object.freeze({
+  // 讯飞 AStudio（机器代号 → 型号，逐条实测）
   xopglm52: 'glm-5-2',
   xopdeepseekv4pro0813: 'deepseek-v4-pro',
-  xopdsv4flash0731in: 'deepseek-v4-flash',
+  xopdsv4flash0731in: 'deepseek-flash',
+  'xdeepseek-flash-in': 'deepseek-flash',
 })
 
 /**
@@ -575,31 +601,44 @@ export function canonicalKeyFor(
     : Object.hasOwn(providerPatch, realId)
       ? providerPatch[realId]
       : Object.entries(providerPatch).find(([patchId]) => normalizeModelKey(patchId) === idKey)?.[1]
-  if (patched !== undefined) {
-    return EXCLUDED_ALIASES.has(patched) ? undefined : { key: patched, via: 'patch' }
-  }
+  // ⚠️ 补丁命中**不在这里返回** —— 它的产物也要过型号统一表（见下方 `resolved`）。
 
   const nameKey = normalizeNameKey(realName)
-  // ⚠️ name 通道算出的键也要过排除集（理由见上方长注释）。
-  const chosen = channelOf(provider) === 'name' && nameKey.length > 0 && nameKey !== idKey
-    ? { key: nameKey, via: 'name' as const }
-    : { key: idKey, via: 'id' as const }
-  // 兜底：任何候选键落在排除集里（含 `auto`）一律不归入任何虚拟模型。
-  if (EXCLUDED_ALIASES.has(chosen.key)) return undefined
+  /**
+   * 先算出候选键与来源，**不立刻返回**。
+   *
+   * ⚠️⚠️ **补丁产物也必须过型号统一表**（2026-11-16 实施时留下的真缺陷，已修）：
+   * 初版在 `patched` 分支里直接 `return`，而 codearts / modelscope / lobsterai /
+   * autoclaw / magicrew / accio 的六个补丁**全部**走那条路 ⇒ 它们绕过统一表，
+   * 症状正是「机器代号并掉了，但 `deepseek-v4-1-flash` 还单独一条」。
+   * ⇒ 两种来源汇成 `resolved` 后统一出口，表只查一次。
+   */
+  let resolved: { key: string; via: 'id' | 'name' | 'patch' }
+  if (patched !== undefined) {
+    // 排除集判定与既有口径一致（补丁值落在排除集 ⇒ 不归入任何虚拟模型）。
+    if (EXCLUDED_ALIASES.has(patched)) return undefined
+    resolved = { key: patched, via: 'patch' }
+  } else {
+    // ⚠️ name 通道算出的键也要过排除集（理由见上方长注释）。
+    const chosen = channelOf(provider) === 'name' && nameKey.length > 0 && nameKey !== idKey
+      ? { key: nameKey, via: 'name' as const }
+      : { key: idKey, via: 'id' as const }
+    if (EXCLUDED_ALIASES.has(chosen.key)) return undefined
+    resolved = chosen
+  }
 
-  // ⚠️ 型号统一表（2026-11-16）：在算出规范键**之后**查，命中即收敛到通用型号键。
-  //    顺序：EXACT（机器代号，键被改写 ⇒ via=patch）→ pattern（写法变体 ⇒ 保持原通道）。
-  //    既有 provider 补丁（上方 patched 分支）优先级更高，已先返回，不会走到这里。
-  if (Object.hasOwn(CANONICAL_UNIFY_EXACT, chosen.key)) {
-    const unified = CANONICAL_UNIFY_EXACT[chosen.key]!
+  // ⚠️ 型号统一表（2026-11-16）：EXACT（机器代号，键被改写 ⇒ via=patch）→
+  //    pattern（写法变体 / 同档代际归并 ⇒ 保持原通道）。
+  if (Object.hasOwn(CANONICAL_UNIFY_EXACT, resolved.key)) {
+    const unified = CANONICAL_UNIFY_EXACT[resolved.key]!
     return EXCLUDED_ALIASES.has(unified) ? undefined : { key: unified, via: 'patch' }
   }
-  const rule = CANONICAL_UNIFY_RULES.find((r) => r.pattern.test(chosen.key))
+  const rule = CANONICAL_UNIFY_RULES.find((r) => r.pattern.test(resolved.key))
   if (rule !== undefined) {
     // pattern 命中保持原通道（确定性归一，不标 ⚠️补丁）；产物仍过排除集。
-    return EXCLUDED_ALIASES.has(rule.key) ? undefined : { key: rule.key, via: chosen.via }
+    return EXCLUDED_ALIASES.has(rule.key) ? undefined : { key: rule.key, via: resolved.via }
   }
-  return chosen
+  return resolved
 }
 
 /**

@@ -17,8 +17,8 @@ describe('buildVirtualModels：同一模型跨渠道合并', () => {
       codearts: [['deepseek-v4.1-flash', 'deepseek-v4.1-flash']],
     }))
     expect(models).toHaveLength(1)
-    expect(models[0]!.key).toBe('deepseek-v4-1-flash')
-    expect(models[0]!.name).toBe('DeepSeek V4.1 Flash')
+    expect(models[0]!.key).toBe('deepseek-flash')
+    expect(models[0]!.name).toBe('DeepSeek Flash')
     expect(models[0]!.candidates.map((c) => c.provider).sort()).toEqual(['buddy', 'codearts'])
   })
 
@@ -45,20 +45,33 @@ describe('buildVirtualModels：同一模型跨渠道合并', () => {
   })
 })
 
-describe('buildVirtualModels：五条安全红线', () => {
-  it('R1：v4.1 与 v4 不合并', () => {
+describe('buildVirtualModels：安全红线', () => {
+  it('★ R1（2026-11-16 改写）：v4.1 与 v4 的 Flash **合并**（用户要求同档只留一条）', () => {
+    // ⚠️⚠️ 本用例原先断言两者**不合并**（旧红线 R1）。用户 2026-11-16 定案：
+    //    「我放出来的 DeepSeek 都是我精选过的，都可以统一成一个，不管它之前叫啥」
+    //    ⇒ 同档跨代际合并是有意的语义变更，不是回归。红线只剩「Flash 与 Pro 不互并」。
     const models = buildVirtualModels(catalog({
       buddy: [['deepseek-v4.1-flash', 'Deepseek-V4.1-Flash'], ['deepseek-v4-flash', 'Deepseek-V4-Flash']],
     }))
-    expect(models.map((m) => m.key).sort()).toEqual(['deepseek-v4-1-flash', 'deepseek-v4-flash'])
+    expect(models.map((m) => m.key)).toEqual(['deepseek-flash'])
+    expect(models[0]!.name).toBe('DeepSeek Flash')
+    expect(models[0]!.candidates).toHaveLength(2)
   })
 
-  it('R2：日期快照不并入无后缀版本', () => {
+  it('★ R1b：Flash 与 Pro 仍是两条（不得被 Flash 规则吞掉）', () => {
+    const models = buildVirtualModels(catalog({
+      buddy: [['deepseek-v4.1-flash', 'Deepseek-V4.1-Flash'], ['deepseek-v4-pro', 'Deepseek-V4-Pro']],
+    }))
+    expect(models.map((m) => m.key).sort()).toEqual(['deepseek-flash', 'deepseek-v4-pro'])
+  })
+
+  it('★ R2（2026-11-16 改写）：日期快照并入统一 Flash 条（原断言「不并」已被推翻）', () => {
     const models = buildVirtualModels(catalog({
       loomy: [['deepseek-v4-flash-0731', 'DeepSeek V4 Flash 0731 · x3.0']],
       lobsterai: [['deepseek-v4-flash', 'deepseek-v4-flash']],
     }))
-    expect(models.map((m) => m.key).sort()).toEqual(['deepseek-v4-flash', 'deepseek-v4-flash-0731'])
+    expect(models.map((m) => m.key)).toEqual(['deepseek-flash'])
+    expect(models[0]!.candidates.map((c) => c.provider).sort()).toEqual(['lobsterai', 'loomy'])
   })
 
   it('R3：workbuddy 的同展示名 `-sg` 与普通版不合并', () => {
@@ -68,7 +81,7 @@ describe('buildVirtualModels：五条安全红线', () => {
         ['deepseek-v4.1-flash-sg', 'Deepseek-V4.1-Flash'],
       ],
     }))
-    expect(models.map((m) => m.key).sort()).toEqual(['deepseek-v4-1-flash', 'deepseek-v4-1-flash-sg'])
+    expect(models.map((m) => m.key).sort()).toEqual(['deepseek-flash', 'deepseek-v4-1-flash-sg'])
   })
 
   it('R4：抽象别名不进任何虚拟模型', () => {
@@ -121,7 +134,7 @@ describe('buildVirtualModels：排序与容错', () => {
     // provider 会算出乱七八糟的键；id 通道的 provider 也拿不到 fallback 展示名。
     const models = buildVirtualModels({ buddy: [{ id: 'deepseek-v4.1-flash' }] })
     expect(models).toHaveLength(1)
-    expect(models[0]!.key).toBe('deepseek-v4-1-flash')
+    expect(models[0]!.key).toBe('deepseek-flash')
     // 展示名回落到 id 本身，而不是出现 'undefined' 字面量。
     expect(models[0]!.candidates[0]!.realName).toBe('deepseek-v4.1-flash')
     expect(models[0]!.candidates[0]!.realName).not.toContain('undefined')
@@ -154,7 +167,7 @@ describe('buildVirtualModels：排序与容错', () => {
       lobsterai: [{ id: 'deepseek-flash', name: 'DeepSeek-V4.1-Flash' }],
     })
     expect(models).toHaveLength(1)
-    expect(models[0]!.key).toBe('deepseek-v4-1-flash')
+    expect(models[0]!.key).toBe('deepseek-flash')
     expect(models[0]!.candidates[0]!.via).toBe('patch')
   })
 })

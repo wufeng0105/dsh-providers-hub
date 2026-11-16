@@ -7,7 +7,7 @@ import { AccountPool } from '../../src/account-pool.js'
 
 describe('sanitizeAggregateRejections：只保留显式 true，空层不保留', () => {
   it('保留三层都是 true 的条目', () => {
-    const raw = { 'deepseek-v4-1-flash': { buddy: { 'deepseek-v4.1-flash': true } } }
+    const raw = { 'deepseek-flash': { buddy: { 'deepseek-v4.1-flash': true } } }
     expect(sanitizeAggregateRejections(raw)).toEqual(raw)
   })
 
@@ -103,15 +103,15 @@ describe('★ 拒绝必须真的生效：被拒候选不得出现在候选序里
 
   it('拒绝临期更早的那个渠道 ⇒ 请求发给下一个候选', async () => {
     const { adapter, sent } = makeAdapter(() => ({
-      'deepseek-v4-1-flash': { buddy: { 'deepseek-v4.1-flash': true } },
+      'deepseek-flash': { buddy: { 'deepseek-v4.1-flash': true } },
     }))
-    await run(adapter, 'deepseek-v4-1-flash')
+    await run(adapter, 'deepseek-flash')
     expect(sent).toEqual(['codearts'])
   })
 
   it('对照：不拒绝时临期更早的 buddy 排第一（证明差异来自拒绝，不是别的）', async () => {
     const { adapter, sent } = makeAdapter(() => ({}))
-    await run(adapter, 'deepseek-v4-1-flash')
+    await run(adapter, 'deepseek-flash')
     expect(sent).toEqual(['buddy'])
   })
 
@@ -121,7 +121,7 @@ describe('★ 拒绝必须真的生效：被拒候选不得出现在候选序里
     const { adapter, sent } = makeAdapter(() => ({
       'some-other-model': { buddy: { 'deepseek-v4.1-flash': true } },
     }))
-    await run(adapter, 'deepseek-v4-1-flash')
+    await run(adapter, 'deepseek-flash')
     expect(sent).toEqual(['buddy'])
   })
 
@@ -143,9 +143,9 @@ describe('★ 拒绝必须真的生效：被拒候选不得出现在候选序里
     // ⇒ 改为断言**现实可验**的 realId 精度：**同一虚拟模型下、不同渠道**各有候选，
     //    拒绝其中一个渠道的那一条 ⇒ 另一个渠道不受影响（且被拒的那个确实不进池）。
     const { adapter, sent } = makeAdapter(
-      () => ({ 'deepseek-v4-1-flash': { codearts: { 'deepseek-v4.1-flash': true } } }),
+      () => ({ 'deepseek-flash': { codearts: { 'deepseek-v4.1-flash': true } } }),
     )
-    await run(adapter, 'deepseek-v4-1-flash')
+    await run(adapter, 'deepseek-flash')
     // buddy 更临期（桩里 buddy=100 < codearts=900），而 codearts 被精确拒绝
     // ⇒ 只发往 buddy。若「拒绝」没有精确到 realId/渠道，会发往 codearts 或两条都发。
     expect(sent).toEqual(['buddy'])
@@ -153,12 +153,12 @@ describe('★ 拒绝必须真的生效：被拒候选不得出现在候选序里
 
   it('全部候选被拒 ⇒ 如实报零候选（不是静默成功）', async () => {
     const { adapter } = makeAdapter(() => ({
-      'deepseek-v4-1-flash': {
+      'deepseek-flash': {
         buddy: { 'deepseek-v4.1-flash': true },
         codearts: { 'deepseek-v4.1-flash': true },
       },
     }))
-    await expect(adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash'))
+    await expect(adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash'))
       .rejects.toMatchObject({ code: 'MISSING_CREDENTIAL' })
   })
 
@@ -228,7 +228,7 @@ describe('★ 拒绝必须真的生效：被拒候选不得出现在候选序里
       //    按 modelId 的可用性过滤对聚合路径失效 ⇒ 请求发往 buddy 必然失败
       //    （codearts 的 benefit 额度耗尽就是这种形态，`InferHub.4291.200`）。
       const { adapter, sent } = makeGated('buddy', 'deepseek-v4.1-flash')
-      await run(adapter, 'deepseek-v4-1-flash')
+      await run(adapter, 'deepseek-flash')
       expect(sent, '额度已尽的渠道必须让位').toEqual(['codearts'])
     })
 
@@ -251,20 +251,20 @@ describe('★ 拒绝必须真的生效：被拒候选不得出现在候选序里
       // ⚠️ 全部候选都失败时聚合会**如实抛出**最后一个错误 —— 这是正确行为
       //    （不是静默成功），故这里吞掉它、只断言「发往了谁」。
       try {
-        await run(adapter, 'deepseek-v4-1-flash')
+        await run(adapter, 'deepseek-flash')
       } catch { /* 预期：buddy 是唯一候选且它失败了 */ }
       expect(sent, 'buddy 失败后不得回落到额度已尽的 codearts').toEqual(['buddy'])
     })
 
     it('★ 对照：不设额度标记时，临期更早的 buddy 正常当选', async () => {
       const { adapter, sent } = makeGated('__none__', '__none__')
-      await run(adapter, 'deepseek-v4-1-flash')
+      await run(adapter, 'deepseek-flash')
       expect(sent).toEqual(['buddy'])
     })
 
     it('★ 只标记**别的**模型 ⇒ 不影响本模型（过滤按 realId 精确匹配）', async () => {
       const { adapter, sent } = makeGated('buddy', 'some-other-model')
-      await run(adapter, 'deepseek-v4-1-flash')
+      await run(adapter, 'deepseek-flash')
       expect(sent).toEqual(['buddy'])
     })
 
@@ -289,7 +289,7 @@ describe('★ 拒绝必须真的生效：被拒候选不得出现在候选序里
         expiryProbe: async () => 100,
         rejections: () => ({}),
       })
-      await run(adapter, 'deepseek-v4-1-flash')
+      await run(adapter, 'deepseek-flash')
       expect(sent).toEqual(['buddy'])
     })
 
@@ -315,7 +315,7 @@ describe('★ 拒绝必须真的生效：被拒候选不得出现在候选序里
         expiryProbe: async () => 100,
         rejections: () => ({}),
       })
-      await run(adapter, 'deepseek-v4-1-flash')
+      await run(adapter, 'deepseek-flash')
       expect(sent, '查询异常 ⇒ 保留候选').toEqual(['buddy'])
     })
   })
@@ -325,12 +325,12 @@ describe('★ 拒绝必须真的生效：被拒候选不得出现在候选序里
     //    那是真实缺陷（用户会以为开关坏了）。
     let table: RejectionTable = {}
     const { adapter, sent } = makeAdapter(() => table)
-    await run(adapter, 'deepseek-v4-1-flash')
+    await run(adapter, 'deepseek-flash')
     expect(sent).toEqual(['buddy'])
     // 面板上关掉 buddy
-    table = { 'deepseek-v4-1-flash': { buddy: { 'deepseek-v4.1-flash': true } } }
+    table = { 'deepseek-flash': { buddy: { 'deepseek-v4.1-flash': true } } }
     sent.length = 0
-    await run(adapter, 'deepseek-v4-1-flash')
+    await run(adapter, 'deepseek-flash')
     expect(sent).toEqual(['codearts'])
   })
 
@@ -339,13 +339,13 @@ describe('★ 拒绝必须真的生效：被拒候选不得出现在候选序里
     //    用户在面板上关掉的候选在 60 秒内仍会被尝试 —— 用户会以为开关坏了。
     let table: RejectionTable = {}
     const { adapter, sent } = makeAdapter(() => table)
-    await run(adapter, 'deepseek-v4-1-flash')   // 填缓存
+    await run(adapter, 'deepseek-flash')   // 填缓存
     expect(sent).toEqual(['buddy'])
     // 模拟 RPC 改完拒绝表后清缓存（Task 3 的端点会调它）
-    table = { 'deepseek-v4-1-flash': { buddy: { 'deepseek-v4.1-flash': true } } }
+    table = { 'deepseek-flash': { buddy: { 'deepseek-v4.1-flash': true } } }
     adapter.clearChoiceCache()
     sent.length = 0
-    await run(adapter, 'deepseek-v4-1-flash')
+    await run(adapter, 'deepseek-flash')
     expect(sent).toEqual(['codearts'])
   })
 
@@ -369,9 +369,9 @@ describe('★ 拒绝必须真的生效：被拒候选不得出现在候选序里
     const adapter = new AggregateAdapter(ctx, {
       accountPool: pool,
       expiryProbe: async (p: string) => { probed.push(p); return 100 },
-      rejections: () => ({ 'deepseek-v4-1-flash': { codearts: { 'deepseek-v4.1-flash': true } } }),
+      rejections: () => ({ 'deepseek-flash': { codearts: { 'deepseek-v4.1-flash': true } } }),
     })
-    await run(adapter, 'deepseek-v4-1-flash')
+    await run(adapter, 'deepseek-flash')
     expect(probed).toEqual(['buddy'])
   })
 })
@@ -400,13 +400,13 @@ describe('★ aggregate.catalog 的组装（只读、零余额查询）', () => 
 
   it('每个候选都带 provider / realId / realName / 倍率 / 是否补丁 / 三态 / 是否接入折算', async () => {
     const adapter = makeAdapter(
-      () => ({ 'deepseek-v4-1-flash': { buddy: { 'deepseek-v4.1-flash': true } } }),
+      () => ({ 'deepseek-flash': { buddy: { 'deepseek-v4.1-flash': true } } }),
       () => {},
     )
     const catalog = await adapter.describeCatalog()
-    const entry = catalog.models.find((m) => m.canonicalId === 'deepseek-v4-1-flash')
+    const entry = catalog.models.find((m) => m.canonicalId === 'deepseek-flash')
     expect(entry).toBeDefined()
-    expect(entry!.name).toBe('DeepSeek V4.1 Flash')
+    expect(entry!.name).toBe('DeepSeek Flash')
     expect(entry!.candidates).toEqual([
       {
         provider: 'buddy',
@@ -461,7 +461,7 @@ describe('★ aggregate.catalog 的组装（只读、零余额查询）', () => 
       // lobsterai 的 deepseek-flash 靠**显式补丁**归一（id/name 两通道都命中不了）
       lobsterai: [{ id: 'deepseek-flash', name: 'DeepSeek Flash' }],
     })
-    const target = virtual.find((m) => m.key === 'deepseek-v4-1-flash')
+    const target = virtual.find((m) => m.key === 'deepseek-flash')
     expect(target, '补丁应把 lobsterai 的条目归入同一虚拟键').toBeDefined()
     const patched = target!.candidates.find((c) => c.via === 'patch')
     expect(patched, '补丁来源的候选必须被标记（面板据此标 ⚠️补丁）').toBeDefined()
@@ -470,7 +470,7 @@ describe('★ aggregate.catalog 的组装（只读、零余额查询）', () => 
   })
 
   it('★ 只读：describeCatalog 不得改动拒绝表', async () => {
-    const table = { 'deepseek-v4-1-flash': { buddy: { 'deepseek-v4.1-flash': true } } }
+    const table = { 'deepseek-flash': { buddy: { 'deepseek-v4.1-flash': true } } }
     const before = JSON.stringify(table)
     const adapter = makeAdapter(() => table, () => {})
     await adapter.describeCatalog()
@@ -555,7 +555,7 @@ describe('★★ 未接入渠道的候选：可见、默认不参与、可手工
 
   it('★ 候选**全部**列出（含未接入的 raccoon），并逐条带三态', async () => {
     const catalog = await makeMixed().describeCatalog()
-    const entry = catalog.models.find((m) => m.canonicalId === 'deepseek-v4-1-flash')
+    const entry = catalog.models.find((m) => m.canonicalId === 'deepseek-flash')
     expect(entry, '该模型应存在（buddy 已接入）').toBeDefined()
     const providers = entry!.candidates.map((c) => c.provider)
     expect(providers).toContain('buddy')
@@ -575,7 +575,7 @@ describe('★★ 未接入渠道的候选：可见、默认不参与、可手工
 
   it('★ 未接入且未打开 ⇒ `rejected` 为 true（语义 = 当前不参与），`expiryWired` 为 false', async () => {
     const catalog = await makeMixed().describeCatalog()
-    const entry = catalog.models.find((m) => m.canonicalId === 'deepseek-v4-1-flash')
+    const entry = catalog.models.find((m) => m.canonicalId === 'deepseek-flash')
     const raccoon = entry!.candidates.find((c) => c.provider === 'raccoon')!
     expect(raccoon.rejected).toBe(true)
     expect(raccoon.expiryWired).toBe(false)
@@ -604,10 +604,10 @@ describe('★★ 未接入渠道的候选：可见、默认不参与、可手工
     const adapter = new AggregateAdapter(ctx, {
       accountPool: pool,
       expiryProbe: async () => 100,
-      allowed: () => ({ 'deepseek-v4-1-flash': { raccoon: { 'deepseek-v4.1-flash': true } } }),
+      allowed: () => ({ 'deepseek-flash': { raccoon: { 'deepseek-v4.1-flash': true } } }),
     })
     const catalog = await adapter.describeCatalog()
-    const entry = catalog.models.find((m) => m.canonicalId === 'deepseek-v4-1-flash')
+    const entry = catalog.models.find((m) => m.canonicalId === 'deepseek-flash')
     const raccoon = entry!.candidates.find((c) => c.provider === 'raccoon')!
     expect(raccoon.state, '白名单命中 ⇒ 参与轮换').toBe('allowed')
     expect(raccoon.rejected).toBe(false)
@@ -751,7 +751,7 @@ describe('★ describeExpiryOrder：「按临期排序」的探测（唯一会�
 
   it('★ 只读：不得改动拒绝表', async () => {
     const calls: string[] = []
-    const table = { 'deepseek-v4-1-flash': { buddy: { 'deepseek-v4.1-flash': true } } }
+    const table = { 'deepseek-flash': { buddy: { 'deepseek-v4.1-flash': true } } }
     const before = JSON.stringify(table)
     const adapter = makeAdapter(async () => 1_000, calls)
     await adapter.describeExpiryOrder()
@@ -818,10 +818,10 @@ describe('★ D4：拒绝记录的 realId 漂移 ⇒ 降级为渠道级', () => 
     // 记录锁的是旧 id `deepseek-v4-flash`，而当前候选是 `deepseek-flash`
     const adapter = makeAdapter(
       { lobsterai: [{ id: 'deepseek-flash', name: 'Deepseek-Flash' }] },
-      { 'deepseek-v4-1-flash': { lobsterai: { 'deepseek-v4-flash': true } } },
+      { 'deepseek-flash': { lobsterai: { 'deepseek-v4-flash': true } } },
     )
     const virtual = {
-      key: 'deepseek-v4-1-flash',
+      key: 'deepseek-flash',
       candidates: [{ provider: 'lobsterai', realId: 'deepseek-flash' }],
     }
     // ★ 降级：当前候选（deepseek-flash）也被拒
@@ -876,10 +876,10 @@ describe('★ D4：拒绝记录的 realId 漂移 ⇒ 降级为渠道级', () => 
     const adapter = new AggregateAdapter(ctx, {
       accountPool: pool,
       expiryProbe: async () => 100,
-      rejections: () => ({ 'deepseek-v4-1-flash': { lobsterai: { 'deepseek-v4-flash': true } } }),
+      rejections: () => ({ 'deepseek-flash': { lobsterai: { 'deepseek-v4-flash': true } } }),
     })
     adapter.rejectedFor({
-      key: 'deepseek-v4-1-flash',
+      key: 'deepseek-flash',
       candidates: [{ provider: 'lobsterai', realId: 'deepseek-flash' }],
     })
     expect(warns.some((m) => m.includes('漂移') && m.includes('降级为渠道级拒绝'))).toBe(true)
@@ -960,7 +960,7 @@ describe('★★ D4 降级必须**可恢复**（独立审计实测证伪：D4 �
     //      本用例锁的就是「恢复路径必须存在」。
     // 记录旧键（漂移走），当前候选是 deepseek-flash
     const virtual = {
-      key: 'deepseek-v4-1-flash',
+      key: 'deepseek-flash',
       candidates: [{ provider: 'lobsterai', realId: 'deepseek-flash' }],
     }
     // ★ **走真实的恢复路径**：`AccountPool.setAggregateRejected(..., false)`。
@@ -970,7 +970,7 @@ describe('★★ D4 降级必须**可恢复**（独立审计实测证伪：D4 �
     //    却仍然绿（**假覆盖**，正是我要求审计去查的那个形态，我自己又犯了一次）。
     //    ⇒ 改写为构造**真实**的 `AccountPool`（它持有权威表）并调用真实写入方法。
     const pool = await makePoolWithRejections({
-      'deepseek-v4-1-flash': { lobsterai: { 'deepseek-v4-flash': true } },
+      'deepseek-flash': { lobsterai: { 'deepseek-v4-flash': true } },
     })
     const realAdapter = makeAdapterFromPool(pool)
     // 前置：当前确实被降级拒绝（旧键漂移走）
@@ -978,7 +978,7 @@ describe('★★ D4 降级必须**可恢复**（独立审计实测证伪：D4 �
       'lobsterai\u0000deepseek-flash',
     ])
     // ★ 用户「重新打开」当前候选（真实写入路径）
-    await pool.setAggregateRejected('deepseek-v4-1-flash', 'lobsterai', 'deepseek-flash', false)
+    await pool.setAggregateRejected('deepseek-flash', 'lobsterai', 'deepseek-flash', false)
     // ★ 恢复必须生效：表里既无精确命中也无漂移记录 ⇒ 不降级
     expect(
       [...realAdapter.rejectedFor(virtual)],
@@ -988,11 +988,11 @@ describe('★★ D4 降级必须**可恢复**（独立审计实测证伪：D4 �
 
   it('★ 对照：表里**只有**当前 realId 的精确记录 ⇒ 精确拒绝（无降级）', async () => {
     const pool = await makePoolWithRejections({
-      'deepseek-v4-1-flash': { lobsterai: { 'deepseek-flash': true } },
+      'deepseek-flash': { lobsterai: { 'deepseek-flash': true } },
     })
     const adapter = makeAdapterFromPool(pool)
     const virtual = {
-      key: 'deepseek-v4-1-flash',
+      key: 'deepseek-flash',
       candidates: [{ provider: 'lobsterai', realId: 'deepseek-flash' }],
     }
     expect([...adapter.rejectedFor(virtual)]).toEqual(['lobsterai\u0000deepseek-flash'])

@@ -46,7 +46,7 @@ describe('normalizeModelKey：版本结构必须保留（T1 / T2 / T3）', () =>
       .not.toBe(normalizeModelKey('deepseek-v4-flash'))
   })
 
-  it('workbuddy 的 `-sg` 与普通版不合并（展示名逐字相同也不行）', () => {
+  it('workbuddy 的 `-sg` 与普通版在**归一函数**里就不同（合并只发生在统一表层）', () => {
     expect(normalizeModelKey('deepseek-v4.1-flash')).toBe('deepseek-v4-1-flash')
     expect(normalizeModelKey('deepseek-v4.1-flash-sg')).toBe('deepseek-v4-1-flash-sg')
     expect(normalizeModelKey('deepseek-v4.1-flash'))
@@ -267,7 +267,7 @@ describe('排除集（T11：抽象别名不是真实模型）', () => {
 describe('canonicalKeyFor：主通道 + 补丁', () => {
   it('id 通道（buddy）：直接用 id', () => {
     expect(canonicalKeyFor('buddy', 'deepseek-v4.1-flash', 'Deepseek-V4.1-Flash'))
-      .toEqual({ key: 'deepseek-v4-1-flash', via: 'id' })
+      .toEqual({ key: 'deepseek-flash', via: 'id' })
   })
 
   it('name 通道（qoder）：id 是代号时用展示名', () => {
@@ -286,13 +286,19 @@ describe('canonicalKeyFor：主通道 + 补丁', () => {
     // lobsterai 的 deepseek-flash 是远端专有 id，展示名叫 DeepSeek-V4.1-Flash。
     // id 通道会给出 `deepseek-flash`（与 V4.1 Flash 无字面关系），故必须靠补丁。
     expect(canonicalKeyFor('lobsterai', 'deepseek-flash', 'DeepSeek-V4.1-Flash'))
-      .toEqual({ key: 'deepseek-v4-1-flash', via: 'patch' })
+      .toEqual({ key: 'deepseek-flash', via: 'patch' })
   })
 
-  it('补丁不覆盖未登记的 id（lobsterai 的旧模型仍走各自通道）', () => {
+  it('补丁只覆盖登记的 id，其余走各自通道（但同档仍会被统一表合并）', () => {
     const got = canonicalKeyFor('lobsterai', 'deepseek-v4-flash', 'deepseek-v4-flash')
-    expect(got?.key).toBe('deepseek-v4-flash')
+    // ⚠️ 这一条**不是**「走没走补丁」的判据（补丁只登记 `deepseek-flash`），
+    //    但它现在也会被统一表并进 Flash 条 —— 这正是用户要的同档一条。
+    expect(got?.key).toBe('deepseek-flash')
     expect(got?.via).toBe('id')
+    // 真正的「补丁只覆盖登记的 id」判据：未登记的 id 走 id 通道算出的键
+    // （`deepseek-v4-flash` 归一后正是补丁没登记的那个），补丁没有把它改写走。
+    expect(canonicalKeyFor('lobsterai', 'some-other-model', 'some-other-model'))
+      .toEqual({ key: 'some-other-model', via: 'id' })
   })
 
   it('抽象别名返回 undefined（不归入任何虚拟模型）', () => {
@@ -315,7 +321,7 @@ describe('canonicalKeyFor：主通道 + 补丁', () => {
 
 describe('规范展示名', () => {
   it('已登记的键给出官方写法', () => {
-    expect(canonicalDisplayName('deepseek-v4-1-flash')).toBe('DeepSeek V4.1 Flash')
+    expect(canonicalDisplayName('deepseek-flash')).toBe('DeepSeek Flash')
     expect(canonicalDisplayName('glm-5-3-flash')).toBe('GLM-5.3-Flash')
     expect(canonicalDisplayName('kimi-k3')).toBe('Kimi-K3')
   })
@@ -625,7 +631,7 @@ describe('deepseek 的日期快照后缀（-1017 / -0813）：归到对应无后
    */
   it('★ codearts 的 `…-1017` 归到 `deepseek-v4-1-flash`', () => {
     const got = canonicalKeyFor('codearts', 'deepseek-v4.1-flash-1017', 'DeepSeek-V4.1-Flash-1017 · x0.12')
-    expect(got?.key).toBe('deepseek-v4-1-flash')
+    expect(got?.key).toBe('deepseek-flash')
     // 归属必须来自补丁（人工实测结论），不是 id 通道撞出来的
     expect(got?.via).toBe('patch')
     // 判据是「与同渠道无后缀版本同键」
@@ -636,7 +642,7 @@ describe('deepseek 的日期快照后缀（-1017 / -0813）：归到对应无后
     // ⚠️ 补丁表按 realId **原文**精确匹配 —— 这条用例就是钉住「别名必须写全命名空间」，
     //    若有人把键简化成 `DeepSeek-V4.1-Flash-1017`，这里会变红。
     const got = canonicalKeyFor('modelscope', 'deepseek-ai/DeepSeek-V4.1-Flash-1017', 'DeepSeek-V4.1-Flash (魔搭)')
-    expect(got?.key).toBe('deepseek-v4-1-flash')
+    expect(got?.key).toBe('deepseek-flash')
     expect(got?.via).toBe('patch')
     expect(got?.key).toBe(canonicalKeyFor('modelscope', 'deepseek-ai/DeepSeek-V4.1-Flash', 'DeepSeek-V4.1-Flash (魔搭)')?.key)
   })
@@ -650,38 +656,54 @@ describe('deepseek 的日期快照后缀（-1017 / -0813）：归到对应无后
     expect(got?.key).toBe(canonicalKeyFor('modelscope', 'deepseek-ai/DeepSeek-V4-Pro', 'DeepSeek-V4-Pro (魔搭)')?.key)
   })
 
-  it('⚠️ 只合并**已登记**的后缀：未登记的（0731 / -official）仍是独立键', () => {
-    // 这条守卫钉的是「不许把补丁改写成通用剥 `-NNNN`」——
-    // `deepseek-v4-flash-0731` 目前**没有**登记（V4-Flash 的另一个 build，
-    // 是否并入等用户确认），一旦有人加通用剥离规则，这里会立刻变红。
+  it('★ 2026-11-16 改判：日期快照与 `-official` **也并入**同档统一条', () => {
+    // ⚠️ 本用例原先断言「只合并已登记的后缀，0731 / -official 仍是独立键」。
+    //    用户 2026-11-16 定案「不管它之前叫啥」⇒ 同档变体一律并入，故改写。
+    //    ⚠️ 代价已登记：轮换按临期挑候选，可能落到 `-0731`（旧 build）或 `-official` 通道；
+    //    要排除就把对应渠道的该模型关掉。
     expect(canonicalKeyFor('modelscope', 'deepseek-ai/DeepSeek-V4-Flash-0731', 'DeepSeek-V4-Flash-0731 (魔搭)')?.key)
-      .toBe('deepseek-v4-flash-0731')
-    // 反过来：V4-Flash 无后缀那条仍然是它自己的键，没被 0731 拖走
+      .toBe('deepseek-flash')
     expect(canonicalKeyFor('buddy', 'deepseek-v4-flash', 'Deepseek-V4-Flash · x0.17')?.key)
-      .toBe('deepseek-v4-flash')
-    // badge 型后缀同理（trae 的官方通道，倍率不同）
+      .toBe('deepseek-flash')
+    // badge 型后缀同样并入（但并进的是 **Pro** 条，不得跨档）
     expect(canonicalKeyFor('trae', 'DeepSeek-V4-Pro-Official', 'DeepSeek-V4-Pro · x0.72→x0.36')?.key)
-      .toBe('deepseek-v4-pro-official')
+      .toBe('deepseek-v4-pro')
   })
 
-  it('⚠️ 新加坡区 `-sg` 仍是独立键（不许因为「都是 V4.1 Flash」而合并）', () => {
+  it('⚠️ 新加坡区 `-sg` 仍是独立键（区域通道不是写法变体，不参与统一）', () => {
     // workbuddy 的 `-sg` 展示名逐字也是 `Deepseek-V4.1-Flash`（只多了 ` · x0.11 SG`），
-    // 但它是**另一条区域通道** —— 模块头的反例就是它。
+    // 但它是**另一条区域链路** —— 用户 2026-11-16 的合并诉求针对「同一个模型的叫法」，
+    // 不针对区域通道，故保留独立键（模块头铁律 2）。
     expect(canonicalKeyFor('workbuddy', 'deepseek-v4.1-flash-sg', 'Deepseek-V4.1-Flash · x0.11 SG')?.key)
       .toBe('deepseek-v4-1-flash-sg')
+    // 而同渠道的普通版并进统一键
     expect(canonicalKeyFor('workbuddy', 'deepseek-v4.1-flash', 'Deepseek-V4.1-Flash')?.key)
-      .toBe('deepseek-v4-1-flash')
+      .toBe('deepseek-flash')
   })
 })
 
-describe('型号统一表（2026-11-16 规格 §3.2）：写法变体收敛为通用型号键', () => {
-  // 正向：写法变体（连字符有无 / -free）与机器代号收敛到统一键。
-  // provider 用不在既有补丁表里的 'buddy'/'astudio'，确保走的是统一表而非旧补丁。
+describe('型号统一表（2026-11-16）：同档变体与机器代号收敛为通用型号键', () => {
+  /**
+   * ⚠️⚠️ **DeepSeek Flash 一族刻意跨代际合并**（用户 2026-11-16 定案原话：
+   * 「我放出来的 DeepSeek 都是我精选过的，都可以统一成一个 … 不管它之前叫啥」）。
+   *
+   * 这条**推翻了本文件原有的「R1：v4.1 与 v4 不合并」红线** —— 是有意的语义变更，
+   * 不是静默漂移；红线现在只剩「Flash 与 Pro 绝不互并」。
+   */
   it.each([
-    ['deepseek-v4.1-flash', 'deepseek-v4-1-flash'],
-    ['deepseek-v4.1-flash-free', 'deepseek-v4-1-flash'],
-    ['deepseek-v4-flash', 'deepseek-v4-flash'],
+    // 代际 / 写法 / 日期快照 / official 全部并进同一条 Flash
+    ['deepseek-v4.1-flash', 'deepseek-flash'],
+    ['deepseek-v4.1-flash-free', 'deepseek-flash'],
+    ['deepseek-v4-flash', 'deepseek-flash'],
+    ['deepseek-flash', 'deepseek-flash'],
+    ['deepseek-v4-flash-0731', 'deepseek-flash'],
+    ['deepseek-v4-flash-1017', 'deepseek-flash'],
+    ['deepseek-v4-flash-official', 'deepseek-flash'],
+    // Pro 自成一条（与 Flash 互不混）
     ['deepseek-v4-pro', 'deepseek-v4-pro'],
+    ['deepseek-v4-pro-0813', 'deepseek-v4-pro'],
+    ['deepseek-v4-pro-official', 'deepseek-v4-pro'],
+    // GLM / MiniMax / Qwen：只收写法变体，型号仍分开（用户要求 5.3 与 5.3-Flash 都显示）
     ['glm-5.3-flash-free', 'glm-5-3-flash'],
     ['glm-5.3', 'glm-5-3'],
     ['glm-5.2', 'glm-5-2'],
@@ -700,16 +722,19 @@ describe('型号统一表（2026-11-16 规格 §3.2）：写法变体收敛为�
     expect(canonicalKeyFor('buddy', realId, realId)?.key).toBe(key)
   })
 
-  // 机器代号三条（出处 docs/agent-notes/providers-astudio.md §1 真网实测表）。
+  // 机器代号（出处 docs/agent-notes/providers-astudio.md §1 真网实测表 +
+  //  2026-11-16 本机网关重启后的实读目录：astudio 新代号 `xdeepseek-flash-in`
+  //  的 display_name 为 DeepSeek-V4.1-Flash）。
   it.each([
     ['xopglm52', 'glm-5-2'],
     ['xopdeepseekv4pro0813', 'deepseek-v4-pro'],
-    ['xopdsv4flash0731in', 'deepseek-v4-flash'],
+    ['xopdsv4flash0731in', 'deepseek-flash'],
+    ['xdeepseek-flash-in', 'deepseek-flash'],
   ])('机器代号 %s ⇒ %s', (realId, key) => {
     expect(canonicalKeyFor('astudio', realId, realId)?.key).toBe(key)
   })
 
-  // 反向：不同型号 / 未实测变体绝不互并（Review Focus 1）。
+  // 反向：**不同档位**与**未实测变体**绝不互并（Review Focus 1）。
   it.each([
     ['glm-5.3-flash', 'glm-5-3-flash'],                 // 不得被 glm-5-3 吸走
     ['glm-5v-turbo', 'glm-5v-turbo'],                   // 不得被 glm-5 吸走
@@ -717,11 +742,9 @@ describe('型号统一表（2026-11-16 规格 §3.2）：写法变体收敛为�
     ['minimax-m3.1-flash', 'minimax-m3-1-flash'],       // 不得被 minimax-m3 吸走
     ['minimax-m2.7-highspeed', 'minimax-m2-7-highspeed'], // 独立条目不并
     ['minimax-m3.1-flash-preview', 'minimax-m3-1-flash-preview'], // preview 无实测依据不并
-    ['deepseek-v4-flash-0731', 'deepseek-v4-flash-0731'], // 日期快照不通用合并（后端不同模型）
-    ['deepseek-v4-flash-official', 'deepseek-v4-flash-official'], // 规格 §5 刻意不并
-    ['deepseek-v4-pro-official', 'deepseek-v4-pro-official'],
-    ['deepseek-flash', 'deepseek-flash'],               // 代际未实测，首批不并（规格 §5）
+    ['deepseek-v4-pro', 'deepseek-v4-pro'],             // ★ Flash 规则不得吞掉 Pro
     ['deepseek-v4.1-flash-sg', 'deepseek-v4-1-flash-sg'], // 区域通道不并
+    ['deepseek-v4-flash-vision-exp', 'deepseek-v4-flash-vision-exp'], // 独立规格不并
     ['kimi-k3', 'kimi-k3'],                             // 表外键原样
   ])('%s 保持 %s（不互并）', (realId, key) => {
     expect(canonicalKeyFor('buddy', realId, realId)?.key).toBe(key)
@@ -730,6 +753,7 @@ describe('型号统一表（2026-11-16 规格 §3.2）：写法变体收敛为�
   it('机器代号 EXACT 命中 ⇒ via=patch（面板标 ⚠️补丁）', () => {
     expect(canonicalKeyFor('astudio', 'xopglm52', 'GLM-5.2')?.via).toBe('patch')
     expect(canonicalKeyFor('astudio', 'xopdeepseekv4pro0813', 'DeepSeek-V4-Pro')?.via).toBe('patch')
+    expect(canonicalKeyFor('astudio', 'xdeepseek-flash-in', 'DeepSeek-V4.1-Flash')?.via).toBe('patch')
   })
 
   it('写法变体 pattern 命中 ⇒ via 保持原通道（不标 patch）', () => {
@@ -739,10 +763,15 @@ describe('型号统一表（2026-11-16 规格 §3.2）：写法变体收敛为�
     expect(canonicalKeyFor('buddy', 'glm-5.3-flash-free', 'GLM-5.3-Flash')?.via).toBe('id')
   })
 
-  it('既有 provider 补丁优先于统一表', () => {
-    // lobsterai 的 deepseek-flash 补丁指向 v4-1-flash（实测），不得被统一表的任何规则抢走
+  it('★ 既有 provider 补丁的产物**同样进入统一表**（初版真缺陷：它们曾绕过）', () => {
+    // creamarts/modelscope/lobsterai 的补丁值指向旧键 `deepseek-v4-1-flash`，
+    // 若补丁分支提前 return 就会绕过统一表 ⇒ 同一型号仍两条（2026-11-16 修）。
     expect(canonicalKeyFor('lobsterai', 'deepseek-flash', 'DeepSeek-V4.1-Flash'))
-      .toEqual({ key: 'deepseek-v4-1-flash', via: 'patch' })
+      .toEqual({ key: 'deepseek-flash', via: 'patch' })
+    expect(canonicalKeyFor('codearts', 'deepseek-v4.1-flash-1017', 'DeepSeek-V4.1-Flash-1017')?.key)
+      .toBe('deepseek-flash')
+    expect(canonicalKeyFor('modelscope', 'deepseek-ai/DeepSeek-V4.1-Flash-1017', 'DeepSeek-V4.1-Flash (魔搭)')?.key)
+      .toBe('deepseek-flash')
   })
 
   it('排除集在统一表之后仍生效（auto 不得产出虚拟键）', () => {
@@ -752,16 +781,18 @@ describe('型号统一表（2026-11-16 规格 §3.2）：写法变体收敛为�
 
   it('isUnifiedKey：表内键真、表外键假、原型链键假', () => {
     expect(isUnifiedKey('glm-5-3')).toBe(true)
-    expect(isUnifiedKey('deepseek-v4-flash')).toBe(true)
+    expect(isUnifiedKey('deepseek-flash')).toBe(true)
+    expect(isUnifiedKey('deepseek-v4-pro')).toBe(true)
     expect(isUnifiedKey('minimax-m3-1-flash')).toBe(true)
     expect(isUnifiedKey('qwen4-max')).toBe(true)
     expect(isUnifiedKey('kimi-k3')).toBe(false)
-    expect(isUnifiedKey('deepseek-flash')).toBe(false) // 未并的裸键不是统一键
+    expect(isUnifiedKey('deepseek-v4-1-flash')).toBe(false) // 旧键已并入，不再是任何键
     expect(isUnifiedKey('constructor')).toBe(false)
     expect(isUnifiedKey('auto')).toBe(false)
   })
 
-  it('CANONICAL_NAMES 给新统一键登记了展示名', () => {
+  it('CANONICAL_NAMES 给统一键登记了展示名', () => {
+    expect(canonicalDisplayName('deepseek-flash')).toBe('DeepSeek Flash')
     expect(canonicalDisplayName('minimax-m3-1-flash')).toBe('MiniMax-M3.1-Flash')
     expect(canonicalDisplayName('qwen4-max')).toBe('Qwen4-Max')
     expect(canonicalDisplayName('glm-5-3')).toBe('GLM-5.3')

@@ -312,7 +312,7 @@ describe('AggregateAdapter：目录播报', () => {
     // ⚠️ 第 0 轮：把目录跑热（此刻黑名单为空 ⇒ 不触发补写）。
     await adapter.refreshCatalog(true)
     // ⇒ 用户关掉整个聚合供应商：黑名单覆盖**上一轮**的全量目录。
-    disabled = { auto: true, 'deepseek-v4-1-flash': true }
+    disabled = { auto: true, 'deepseek-flash': true }
     // ⇒ 目录长出一条新模型（`glm-5.3`）⇒ 第二轮触发补写。
     catalogs.buddy = [
       { id: 'deepseek-v4.1-flash', name: 'Deepseek-V4.1-Flash' },
@@ -345,7 +345,7 @@ describe('AggregateAdapter：目录播报', () => {
     }), { accountPool: makePool() })
     await warmCatalog(adapter)
     const models = await adapter.listModels(AGGREGATE_PROVIDER)
-    expect(models.map((m) => m.id)).toEqual(['auto', 'deepseek-v4-1-flash'])
+    expect(models.map((m) => m.id)).toEqual(['auto', 'deepseek-flash'])
     for (const model of models) expect(model.provider).toBe(AGGREGATE_PROVIDER)
   })
 
@@ -370,8 +370,8 @@ describe('AggregateAdapter：目录播报', () => {
     }), { accountPool: makePool() })
     await warmCatalog(adapter)
     const models = await adapter.listModels(AGGREGATE_PROVIDER)
-    const entry = models.find((m) => m.id === 'deepseek-v4-1-flash')
-    expect(entry!.name).toBe('DeepSeek V4.1 Flash · 最低 x0.15')
+    const entry = models.find((m) => m.id === 'deepseek-flash')
+    expect(entry!.name).toBe('DeepSeek Flash · 最低 x0.15')
   })
 
   it('★ 多个候选时取**最便宜**的那个倍率（轮换的第二判据就是倍率升序）', async () => {
@@ -381,9 +381,9 @@ describe('AggregateAdapter：目录播报', () => {
     }), { accountPool: makePool() })
     await warmCatalog(adapter)
     const models = await adapter.listModels(AGGREGATE_PROVIDER)
-    const entry = models.find((m) => m.id === 'deepseek-v4-1-flash')
+    const entry = models.find((m) => m.id === 'deepseek-flash')
     // 最便宜的是 codearts 的 x0.03 —— 那才是最可能被路由到的那个价。
-    expect(entry!.name).toBe('DeepSeek V4.1 Flash · 最低 x0.03')
+    expect(entry!.name).toBe('DeepSeek Flash · 最低 x0.03')
   })
 
   it('★ 全部候选都无倍率标注 ⇒ 不加后缀（不得渲染出 xInfinity）', async () => {
@@ -392,8 +392,8 @@ describe('AggregateAdapter：目录播报', () => {
     }), { accountPool: makePool() })
     await warmCatalog(adapter)
     const models = await adapter.listModels(AGGREGATE_PROVIDER)
-    const entry = models.find((m) => m.id === 'deepseek-v4-1-flash')
-    expect(entry!.name).toBe('DeepSeek V4.1 Flash')
+    const entry = models.find((m) => m.id === 'deepseek-flash')
+    expect(entry!.name).toBe('DeepSeek Flash')
     expect(entry!.name).not.toContain('Infinity')
   })
 
@@ -405,8 +405,8 @@ describe('AggregateAdapter：目录播报', () => {
     }), { accountPool: makePool() })
     await warmCatalog(adapter)
     const models = await adapter.listModels(AGGREGATE_PROVIDER)
-    const entry = models.find((m) => m.id === 'deepseek-v4-1-flash')
-    expect(entry!.name).toBe('DeepSeek V4.1 Flash · 最低 免费')
+    const entry = models.find((m) => m.id === 'deepseek-flash')
+    expect(entry!.name).toBe('DeepSeek Flash · 最低 免费')
   })
 
   it('★★ 跨临期档：显示的倍率不得声称「本次就用这个价」（真实缺陷，复审实测）', async () => {
@@ -429,10 +429,10 @@ describe('AggregateAdapter：目录播报', () => {
     }), { accountPool: makePool() })
     await warmCatalog(adapter)
     const models = await adapter.listModels(AGGREGATE_PROVIDER)
-    const entry = models.find((m) => m.id === 'deepseek-v4-1-flash')
+    const entry = models.find((m) => m.id === 'deepseek-flash')
     expect(entry, '虚拟模型必须存在').toBeDefined()
     // ⛔ 修前这里是 `· x0.03`（读起来像「本次就用 0.03」，而实际可能发往 x0.29）。
-    expect(entry!.name, '必须标明这是下界，不能声称本次就用它').toBe('DeepSeek V4.1 Flash · 最低 x0.03')
+    expect(entry!.name, '必须标明这是下界，不能声称本次就用它').toBe('DeepSeek Flash · 最低 x0.03')
     expect(entry!.name, '「最低」二字不可省').toContain('最低')
   })
 
@@ -443,8 +443,8 @@ describe('AggregateAdapter：目录播报', () => {
     const adapter = new AggregateAdapter(makeCtx({
       buddy: [{ id: 'deepseek-v4.1-flash', name: 'Deepseek-V4.1-Flash · x0.15' }],
     }), { accountPool: makePool() })
-    const info = await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
-    expect(info.name).toBe('DeepSeek V4.1 Flash')
+    const info = await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-flash')
+    expect(info.name).toBe('DeepSeek Flash')
   })
 
   it('★ 未接入临期折算的候选不参与报价（它永远不会被路由到）', async () => {
@@ -464,15 +464,15 @@ describe('AggregateAdapter：目录播报', () => {
     }), { accountPool: makePool() })
     await warmCatalog(adapter)
     const models = await adapter.listModels(AGGREGATE_PROVIDER)
-    const entry = models.find((m) => m.id === 'deepseek-v4-1-flash')
+    const entry = models.find((m) => m.id === 'deepseek-flash')
     // 前置断言：模型确实在（否则下面那条断言会因 undefined 而**假通过**的变体）。
     expect(entry, '虚拟模型必须存在（buddy 是已接入候选）').toBeDefined()
-    expect(entry!.name).toBe('DeepSeek V4.1 Flash · 最低 x0.15')
+    expect(entry!.name).toBe('DeepSeek Flash · 最低 x0.15')
   })
 
   it('被用户关闭的虚拟模型不播报（套 disabledModelsFor 黑名单）', async () => {
     const pool = {
-      disabledModelsFor: () => new Set(['deepseek-v4-1-flash']),
+      disabledModelsFor: () => new Set(['deepseek-flash']),
       getAvailableAccount: async () => ({ entry: { id: 'a1' }, credential: {} }),
     } as never
     const adapter = new AggregateAdapter(makeCtx({
@@ -484,7 +484,7 @@ describe('AggregateAdapter：目录播报', () => {
   })
 
   it('listAllModels 不套黑名单（设置页要能看到被关的模型）', async () => {
-    const disabled = new Set(['deepseek-v4-1-flash'])
+    const disabled = new Set(['deepseek-flash'])
     const pool = { disabledModelsFor: () => disabled, getAvailableAccount: async () => null } as never
     const adapter = new AggregateAdapter(makeCtx({
       buddy: [{ id: 'deepseek-v4.1-flash', name: 'Deepseek-V4.1-Flash' }],
@@ -496,9 +496,9 @@ describe('AggregateAdapter：目录播报', () => {
     const all = adapter.listAllModels()
     // 对照：同一个模型在 listModels 里被黑名单挡掉…
     const listed = await adapter.listModels(AGGREGATE_PROVIDER)
-    expect(listed.map((m) => m.id)).not.toContain('deepseek-v4-1-flash')
+    expect(listed.map((m) => m.id)).not.toContain('deepseek-flash')
     // …但在全量目录里必须仍在（否则用户在设置页连开关都摸不着）。
-    expect(all.map((m) => m.id)).toContain('deepseek-v4-1-flash')
+    expect(all.map((m) => m.id)).toContain('deepseek-flash')
   })
 })
 
@@ -507,10 +507,10 @@ describe('AggregateAdapter：resolveModel 必须按入参回填', () => {
     const adapter = new AggregateAdapter(makeCtx({
       buddy: [{ id: 'deepseek-v4.1-flash', name: 'Deepseek-V4.1-Flash' }],
     }), { accountPool: makePool() })
-    const info = await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const info = await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-flash')
     expect(info.provider).toBe(AGGREGATE_PROVIDER)
-    expect(info.id).toBe('deepseek-v4-1-flash')
-    expect(info.name).toBe('DeepSeek V4.1 Flash')
+    expect(info.id).toBe('deepseek-flash')
+    expect(info.name).toBe('DeepSeek Flash')
   })
 
   it('auto 也能解析（不因多模型改造而丢失）', async () => {
@@ -536,7 +536,7 @@ describe('AggregateAdapter：resolveModel 必须按入参回填', () => {
     const adapter = new AggregateAdapter(makeCtx({
       buddy: [{ id: 'deepseek-v4.1-flash', name: 'Deepseek-V4.1-Flash' }],
     }), { accountPool: makePool() })
-    const info = await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const info = await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-flash')
     expect(info.inputModalities).toContain('image')
   })
 
@@ -643,7 +643,7 @@ describe('registerAggregateLlm：注册后预热目录', () => {
     await new Promise(resolve => setTimeout(resolve, 0))
 
     // 关键断言：**没有**手动调过 listModels，全量目录也必须已经非空。
-    expect(adapter.listAllModels().map((m) => m.id)).toContain('deepseek-v4-1-flash')
+    expect(adapter.listAllModels().map((m) => m.id)).toContain('deepseek-flash')
   })
 })
 
@@ -753,7 +753,7 @@ describe('prepareCall：真实链路 prepareCall → call.stream', () => {
       expiryProbe: async (provider) => (provider === 'buddy' ? 100 : 900),
     })
 
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     for await (const _chunk of call.stream({ messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }] } as never)) {
       // 必须真正 drain，否则 stream 从未被调用、sent 会是空的
     }
@@ -788,7 +788,7 @@ describe('prepareCall：真实链路 prepareCall → call.stream', () => {
       expiryProbe: async (provider) => (provider === 'buddy' ? 100 : 900),
     })
 
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     const chunks: unknown[] = []
     for await (const chunk of call.stream({ messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }] } as never)) {
       chunks.push(chunk)
@@ -818,7 +818,7 @@ describe('prepareCall：真实链路 prepareCall → call.stream', () => {
       expiryProbe: async () => 100,
     })
 
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     await expect((async () => {
       for await (const _ of call.stream({ messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }] } as never)) { /* drain */ }
     })()).rejects.toThrow('全挂了')
@@ -855,7 +855,7 @@ describe('prepareCall：真实链路 prepareCall → call.stream', () => {
       expiryProbe: async (provider) => (provider === 'buddy' ? 100 : 900),
     })
 
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     const chunks: Array<{ type: string; text?: string }> = []
     await expect((async () => {
       for await (const chunk of call.stream({ messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }] } as never)) {
@@ -992,7 +992,7 @@ describe('prepareCall：真实链路 prepareCall → call.stream', () => {
       accountPool: makePool(),
       expiryProbe: async (provider) => (provider === 'buddy' ? 100 : 900),
     })
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
 
     // ① 带图：改道到 codearts（尽管 buddy 临期更早）。
     for await (const _ of call.stream({
@@ -1020,7 +1020,7 @@ describe('prepareCall：真实链路 prepareCall → call.stream', () => {
       },
     } as never
     const adapter = new AggregateAdapter(ctx, { accountPool: makePool(), expiryProbe: async () => 100 })
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     expect(() => call.stream({
       messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', data: 'x' } }] }],
     } as never)).toThrow(/不支持图片/)
@@ -1063,7 +1063,7 @@ describe('★ 失败切换在真实归一化路径上必须生效（Task 6 复�
     } as never
     const adapter = new AggregateAdapter(ctx, { accountPool: makePool(), expiryProbe: async () => 100 })
 
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     const chunks: Array<{ type: string }> = []
     for await (const chunk of call.stream({
       messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
@@ -1100,7 +1100,7 @@ describe('★ 失败切换在真实归一化路径上必须生效（Task 6 复�
     } as never
     const adapter = new AggregateAdapter(ctx, { accountPool: makePool(), expiryProbe: async () => 100 })
 
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     await expect((async () => {
       for await (const _ of call.stream({
         messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
@@ -1134,7 +1134,7 @@ describe('★ 失败切换在真实归一化路径上必须生效（Task 6 复�
     } as never
     const adapter = new AggregateAdapter(ctx, { accountPool: makePool(), expiryProbe: async () => 100 })
 
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     // 不传 signal ⇒ signal 未标记
     const error = await (async () => {
       try {
@@ -1171,7 +1171,7 @@ describe('★ 失败切换在真实归一化路径上必须生效（Task 6 复�
     } as never
     const adapter = new AggregateAdapter(ctx, { accountPool: makePool(), expiryProbe: async () => 100 })
 
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     await expect((async () => {
       for await (const _ of call.stream({
         messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
@@ -1214,7 +1214,7 @@ describe('★ 探针抛 AbortError 时不得被吞成「没有可用候选」（
       },
     })
 
-    await expect(adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash'))
+    await expect(adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash'))
       .rejects.toMatchObject({ name: 'AbortError' })
   })
 
@@ -1245,7 +1245,7 @@ describe('★ 探针抛 AbortError 时不得被吞成「没有可用候选」（
       },
     })
 
-    const error = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const error = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
       .then(() => undefined, (caught: { message?: string }) => caught)
     expect(
       error?.message,
@@ -1285,7 +1285,7 @@ describe('★ 能力解析（capabilityOf）里的中止判据也必须与 isAbo
       expiryProbe: async () => 100,
     })
 
-    const error = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const error = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
       .then(() => undefined, (caught: { message?: string }) => caught)
     expect(
       error?.message,
@@ -1315,7 +1315,7 @@ describe('★ 终审修正：错误码保真 / 渠道白名单 / 第三处 abort
       getAvailableAccount: async () => ({ entry: { id: 'a1' }, credential: {} }),
     } as never
     const adapter = new AggregateAdapter(ctx, { accountPool: pool, expiryProbe: async () => 100 })
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     await expect((async () => {
       for await (const _ of call.stream({
         messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
@@ -1340,7 +1340,7 @@ describe('★ 终审修正：错误码保真 / 渠道白名单 / 第三处 abort
       getAvailableAccount: async () => ({ entry: { id: 'a1' }, credential: {} }),
     } as never
     const adapter = new AggregateAdapter(ctx, { accountPool: pool, expiryProbe: async () => 100 })
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     await expect((async () => {
       for await (const _ of call.stream({
         messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
@@ -1365,7 +1365,7 @@ describe('★ 终审修正：错误码保真 / 渠道白名单 / 第三处 abort
         listModels: async (provider: string) => (provider === 'buddy'
           ? [{ id: 'deepseek-v4.1-flash', name: 'Deepseek-V4.1-Flash' }]
           // 外部 provider 播报一个**同源**模型：若白名单失效，它会与 buddy 合并
-          : [{ id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash' }]),
+          : [{ id: 'deepseek-v4.1-flash', name: 'DeepSeek Flash' }]),
         resolveModelInfo: async (provider: string, id: string) => ({ provider, id }),
         stream: () => (async function* () { /* noop */ })(),
       },
@@ -1409,7 +1409,7 @@ describe('★ 终审修正：错误码保真 / 渠道白名单 / 第三处 abort
       getAvailableAccount: async () => ({ entry: { id: 'a1' }, credential: {} }),
     } as never
     const adapter = new AggregateAdapter(ctx, { accountPool: pool, expiryProbe: async () => 100 })
-    await expect(adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash'))
+    await expect(adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash'))
       .rejects.toMatchObject({ name: 'AbortError' })
   })
 })
@@ -1439,7 +1439,7 @@ describe('★ I2：选型缓存（规格 §9 要求，初版漏实现 ⇒ AGGREG
     })
 
     // 第一次：会探测
-    const first = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const first = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     for await (const _ of first.stream({
       messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
     } as never)) { /* drain */ }
@@ -1447,7 +1447,7 @@ describe('★ I2：选型缓存（规格 §9 要求，初版漏实现 ⇒ AGGREG
     expect(afterFirst).toBeGreaterThan(0)
 
     // 第二次（TTL 内）：不得再探测
-    const second = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const second = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     for await (const _ of second.stream({
       messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
     } as never)) { /* drain */ }
@@ -1476,7 +1476,7 @@ describe('★ I2：选型缓存（规格 §9 要求，初版漏实现 ⇒ AGGREG
       expiryProbe: async () => { probeCalls += 1; return 100 },
     })
 
-    const first = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const first = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     for await (const _ of first.stream({
       messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
     } as never)) { /* drain */ }
@@ -1484,7 +1484,7 @@ describe('★ I2：选型缓存（规格 §9 要求，初版漏实现 ⇒ AGGREG
 
     // 把时钟推过 TTL（60 秒）
     fakeNow += 61_000
-    const second = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const second = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     for await (const _ of second.stream({
       messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
     } as never)) { /* drain */ }
@@ -1515,7 +1515,7 @@ describe('★ I2：选型缓存（规格 §9 要求，初版漏实现 ⇒ AGGREG
     })
 
     // 先请求 A，再请求 B，再回到 A —— 回到 A 时应命中 A 自己的缓存
-    for (const model of ['deepseek-v4-1-flash', 'glm-5-3', 'deepseek-v4-1-flash']) {
+    for (const model of ['deepseek-flash', 'glm-5-3', 'deepseek-flash']) {
       const call = await adapter.prepareCall(AGGREGATE_PROVIDER, model)
       for await (const _ of call.stream({
         messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
@@ -1581,7 +1581,7 @@ describe('★ M23：只产出元数据帧（block-start / usage）时仍可切�
     })())
     const adapter = new AggregateAdapter(ctx, { accountPool: makePool(), expiryProbe: async () => 100 })
 
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     const chunks = await drain(call as never)
 
     // ① 真的切换了
@@ -1600,7 +1600,7 @@ describe('★ M23：只产出元数据帧（block-start / usage）时仍可切�
       yield { type: 'finish', reason: { kind: 'error', failure: { message: '挂了', code: 'SERVER' } } }
     })())
     const adapter = new AggregateAdapter(ctx, { accountPool: makePool(), expiryProbe: async () => 100 })
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     await expect(drain(call as never)).rejects.toThrow()
     expect(sent, '开过块 ⇒ 不切换').toEqual(['buddy'])
   })
@@ -1614,7 +1614,7 @@ describe('★ M23：只产出元数据帧（block-start / usage）时仍可切�
     })())
     const adapter = new AggregateAdapter(ctx, { accountPool: makePool(), expiryProbe: async () => 100 })
 
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     await expect(drain(call as never)).rejects.toThrow()
     // ⚠️ 只试了第一个 —— 产出过正文后绝不切换。
     expect(sent).toEqual(['buddy'])
@@ -1629,7 +1629,7 @@ describe('★ M23：只产出元数据帧（block-start / usage）时仍可切�
     })())
     const adapter = new AggregateAdapter(ctx, { accountPool: makePool(), expiryProbe: async () => 100 })
 
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     await expect(drain(call as never)).rejects.toThrow()
     expect(sent).toEqual(['buddy'])
   })
@@ -1740,15 +1740,15 @@ describe('★ 未接入临期折算的渠道：模型**仍然可见**（用户 2
       {
         accountPool: pool,
         expiryProbe: async () => 100,
-        rejections: () => ({ 'deepseek-v4-1-flash': { buddy: { 'deepseek-v4.1-flash': true } } }),
+        rejections: () => ({ 'deepseek-flash': { buddy: { 'deepseek-v4.1-flash': true } } }),
       },
     )
     await warmCatalog(adapter)
     const models = await adapter.listModels(AGGREGATE_PROVIDER)
-    expect(models.map((m) => m.id), '全部被拒**不得**让模型从目录消失').toContain('deepseek-v4-1-flash')
+    expect(models.map((m) => m.id), '全部被拒**不得**让模型从目录消失').toContain('deepseek-flash')
     // ⚠️ 同时确认三态判据真的把它判成「不参与」—— 否则上面那条断言会掩盖过滤失效。
     const catalog = await adapter.describeCatalog()
-    const entry = catalog.models.find((m) => m.canonicalId === 'deepseek-v4-1-flash')
+    const entry = catalog.models.find((m) => m.canonicalId === 'deepseek-flash')
     expect(entry!.candidates[0]!.state, '显式拒绝 ⇒ rejected 态').toBe('rejected')
     expect(entry!.candidates[0]!.rejected).toBe(true)
   })
@@ -1757,19 +1757,19 @@ describe('★ 未接入临期折算的渠道：模型**仍然可见**（用户 2
     const adapter = new AggregateAdapter(
       makeCtx({
         buddy: [{ id: 'deepseek-v4.1-flash', name: 'Deepseek-V4.1-Flash' }],
-        cline: [{ id: 'cline-free/deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash' }],
+        cline: [{ id: 'cline-free/deepseek-v4.1-flash', name: 'DeepSeek Flash' }],
       }),
       { accountPool: pool, expiryProbe: async () => 100 },
     )
     await warmCatalog(adapter)
     const models = await adapter.listModels(AGGREGATE_PROVIDER)
-    expect(models.some((m) => m.id === 'deepseek-v4-1-flash')).toBe(true)
+    expect(models.some((m) => m.id === 'deepseek-flash')).toBe(true)
     const virtual = (adapter as unknown as { catalog: Array<{ key: string, candidates: Array<{ provider: string }> }> })
-      .catalog.find((v) => v.key === 'deepseek-v4-1-flash')
+      .catalog.find((v) => v.key === 'deepseek-flash')
     expect(virtual?.candidates.map((c) => c.provider).sort()).toEqual(['buddy', 'cline'])
     // ⚠️ 候选表里有 cline **不等于**它会参与轮换：默认态下它是 `default-rejected`。
     const catalog = await adapter.describeCatalog()
-    const entry = catalog.models.find((m) => m.canonicalId === 'deepseek-v4-1-flash')
+    const entry = catalog.models.find((m) => m.canonicalId === 'deepseek-flash')
     const byProvider = Object.fromEntries(entry!.candidates.map((c) => [c.provider, c.state]))
     expect(byProvider.buddy, '已接入 ⇒ 默认参与').toBe('allowed')
     expect(byProvider.cline, '未接入 ⇒ 默认不参与').toBe('default-rejected')
@@ -1780,23 +1780,23 @@ describe('★ 未接入临期折算的渠道：模型**仍然可见**（用户 2
     const adapter = new AggregateAdapter(
       makeCtx({
         buddy: [{ id: 'deepseek-v4.1-flash', name: 'Deepseek-V4.1-Flash · x0.15' }],
-        cline: [{ id: 'cline-free/deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash · x0.01' }],
+        cline: [{ id: 'cline-free/deepseek-v4.1-flash', name: 'DeepSeek Flash · x0.01' }],
       }),
       {
         accountPool: pool,
         expiryProbe: async () => 100,
-        allowed: () => ({ 'deepseek-v4-1-flash': { cline: { 'cline-free/deepseek-v4.1-flash': true } } }),
+        allowed: () => ({ 'deepseek-flash': { cline: { 'cline-free/deepseek-v4.1-flash': true } } }),
       },
     )
     const catalog = await adapter.describeCatalog()
-    const entry = catalog.models.find((m) => m.canonicalId === 'deepseek-v4-1-flash')
+    const entry = catalog.models.find((m) => m.canonicalId === 'deepseek-flash')
     const cline = entry!.candidates.find((c) => c.provider === 'cline')
     expect(cline!.state).toBe('allowed')
     expect(cline!.expiryWired, '客户端据此决定「关掉时写哪张表」').toBe(false)
     // 手工打开后它的价格该算进「最低」—— 否则选择器会说谎（更便宜的候选被用上却没报）。
     const models = await adapter.listModels(AGGREGATE_PROVIDER)
-    expect(models.find((m) => m.id === 'deepseek-v4-1-flash')!.name)
-      .toBe('DeepSeek V4.1 Flash · 最低 x0.01')
+    expect(models.find((m) => m.id === 'deepseek-flash')!.name)
+      .toBe('DeepSeek Flash · 最低 x0.01')
   })
 
   it('`auto` 始终在目录里（它不参与任何过滤，池跨全部渠道）', async () => {
@@ -1815,7 +1815,7 @@ describe('★ 未接入临期折算的渠道：模型**仍然可见**（用户 2
       {
         accountPool: pool,
         expiryProbe: async () => 100,
-        order: () => ({ 'deepseek-v4-1-flash': ['buddy\u0000drifted-away', 'buddy\u0000deepseek-v4.1-flash'] }),
+        order: () => ({ 'deepseek-flash': ['buddy\u0000drifted-away', 'buddy\u0000deepseek-v4.1-flash'] }),
         orderMode: () => 'manual',
       },
     )
@@ -1981,13 +1981,13 @@ describe('★ P3：activeProvider —— 「上次实际转发成功的渠道」
       // buddy 更临期（100 < 900）⇒ 它排第一，但会失败 ⇒ 实际发往 codearts
       expiryProbe: async (provider) => (provider === 'buddy' ? 100 : 900),
     })
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     for await (const _chunk of call.stream({ messages: [] } as never)) { /* drain */ }
 
     expect(sent).toEqual(['buddy/deepseek-v4.1-flash', 'codearts/deepseek-v4.1-flash'])
     // ★ 记录的是**成功**的 codearts，不是排第一但失败的 buddy
     expect(adapter.activeProvider()).toBe('codearts')
-    expect(adapter.activeProvider('deepseek-v4-1-flash')).toBe('codearts')
+    expect(adapter.activeProvider('deepseek-flash')).toBe('codearts')
   })
 
   it('★ 首个候选就成功 ⇒ 记录它（不因「后面还有候选」而变）', async () => {
@@ -1996,7 +1996,7 @@ describe('★ P3：activeProvider —— 「上次实际转发成功的渠道」
       accountPool: pool,
       expiryProbe: async (provider) => (provider === 'buddy' ? 100 : 900),
     })
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     for await (const _chunk of call.stream({ messages: [] } as never)) { /* drain */ }
     expect(adapter.activeProvider()).toBe('buddy')
   })
@@ -2018,7 +2018,7 @@ describe('★ P3：activeProvider —— 「上次实际转发成功的渠道」
       },
     } as never
     const adapter = new AggregateAdapter(ctx, { accountPool: pool, expiryProbe: async () => 100 })
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     await expect((async () => {
       for await (const _chunk of call.stream({ messages: [] } as never)) { /* drain */ }
     })()).rejects.toThrow()
@@ -2043,11 +2043,11 @@ describe('★ P3：activeProvider —— 「上次实际转发成功的渠道」
       },
     } as never
     const adapter = new AggregateAdapter(ctx, { accountPool: pool, expiryProbe: async () => 100 })
-    for (const model of ['deepseek-v4-1-flash', 'glm-5-3']) {
+    for (const model of ['deepseek-flash', 'glm-5-3']) {
       const call = await adapter.prepareCall(AGGREGATE_PROVIDER, model)
       for await (const _chunk of call.stream({ messages: [] } as never)) { /* drain */ }
     }
-    expect(adapter.activeProvider('deepseek-v4-1-flash')).toBe('buddy')
+    expect(adapter.activeProvider('deepseek-flash')).toBe('buddy')
     expect(adapter.activeProvider('glm-5-3')).toBe('buddy')
     expect(adapter.activeProvider()).toBe('buddy')
   })
@@ -2187,7 +2187,7 @@ describe('★★ 已开过块就不能切换（block-start 不可跨候选重放
       // B：开 text 块 + 正文（若切换，正文会被灌进 A 的 tool-call 块）
       [{ type: 'block-start', index: 0, blockType: 'text' }, { type: 'text-delta', index: 0, text: 'B 的正文' }],
     )
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     const yielded: unknown[] = []
     await expect((async () => {
       for await (const chunk of call.stream({ messages: [] } as never)) yielded.push(chunk)
@@ -2204,7 +2204,7 @@ describe('★★ 已开过块就不能切换（block-start 不可跨候选重放
       [{ type: 'usage', usage: { inputTokens: 1, outputTokens: 0 } }],
       [{ type: 'block-start', index: 0, blockType: 'text' }, { type: 'text-delta', index: 0, text: 'B 的正文' }],
     )
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     const yielded: unknown[] = []
     for await (const chunk of call.stream({ messages: [] } as never)) yielded.push(chunk)
     expect(sent, 'usage 未建块 ⇒ 可以安全切换').toEqual(['buddy', 'codearts'])
@@ -2216,7 +2216,7 @@ describe('★★ 已开过块就不能切换（block-start 不可跨候选重放
       [],
       [{ type: 'block-start', index: 0, blockType: 'text' }, { type: 'text-delta', index: 0, text: 'ok' }],
     )
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     for await (const _ of call.stream({ messages: [] } as never)) { /* drain */ }
     expect(sent).toEqual(['buddy', 'codearts'])
   })
@@ -2398,7 +2398,7 @@ describe('★ activeProvider 只记整轮成功的渠道', () => {
       throw new Error('socket hang up')
     })() as AsyncGenerator<unknown>)
     const adapter = new AggregateAdapter(ctx, { accountPool: pool, expiryProbe: async () => 100 })
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     await expect((async () => {
       for await (const _ of call.stream({ messages: [] } as never)) { /* drain */ }
     })()).rejects.toThrow()
@@ -2412,7 +2412,7 @@ describe('★ activeProvider 只记整轮成功的渠道', () => {
       yield { type: 'finish', reason: { kind: 'stop' } }
     })() as AsyncGenerator<unknown>)
     const adapter = new AggregateAdapter(ctx, { accountPool: pool, expiryProbe: async () => 100 })
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     for await (const _ of call.stream({ messages: [] } as never)) { /* drain */ }
     expect(adapter.activeProvider()).toBe('buddy')
   })
@@ -2459,7 +2459,7 @@ describe('★ 上游 failure 的 status / providerRetryAfterMs / requestId 必�
 
   it('★ 三个字段都要保真（尤其 providerRetryAfterMs）', async () => {
     const adapter = new AggregateAdapter(makeCtx(), { accountPool: pool, expiryProbe: async () => 100 })
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     let caught: { code?: string; failure?: Record<string, unknown> } | undefined
     try {
       for await (const _ of call.stream({ messages: [] } as never)) { /* drain */ }
@@ -2496,7 +2496,7 @@ describe('★ 上游 failure 的 status / providerRetryAfterMs / requestId 必�
       },
     } as never
     const adapter = new AggregateAdapter(ctx, { accountPool: pool, expiryProbe: async () => 100 })
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     let caught: { code?: string; failure?: Record<string, unknown> } | undefined
     try {
       for await (const _ of call.stream({ messages: [] } as never)) { /* drain */ }
@@ -2569,7 +2569,7 @@ describe('★★ 已开过任何块都不切换（含 text，因为下一个候�
       // B：开 tool-call 块（若切换，B 的 blockType 被忽略 ⇒ 工具调用丢失）
       [{ type: 'block-start', index: 0, blockType: 'tool-call', id: 'c1', name: 'read_file' }],
     )
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     await expect((async () => {
       for await (const _ of call.stream({ messages: [] } as never)) { /* drain */ }
     })()).rejects.toThrow()
@@ -2581,7 +2581,7 @@ describe('★★ 已开过任何块都不切换（含 text，因为下一个候�
       [{ type: 'usage', usage: { inputTokens: 1, outputTokens: 0 } }],
       [{ type: 'block-start', index: 0, blockType: 'text' }, { type: 'text-delta', index: 0, text: 'ok' }],
     )
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     for await (const _ of call.stream({ messages: [] } as never)) { /* drain */ }
     expect(sent, 'usage 不建块 ⇒ 可安全切换').toEqual(['buddy', 'codearts'])
   })
@@ -2631,7 +2631,7 @@ describe('★★ 边界值 failure 不得让 LlmError 抛校验错（否则原�
       accountPool: pool,
       expiryProbe: async () => 100,
     })
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     try {
       for await (const _ of call.stream({ messages: [] } as never)) { /* drain */ }
       return undefined
@@ -2759,7 +2759,7 @@ describe('★★ ensureCatalog / refreshCatalog 必须接收 signal（真实请�
       accountPool: pool, expiryProbe: async () => 100,
     })
     const controller = new AbortController()
-    const pending = adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash', controller.signal)
+    const pending = adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash', controller.signal)
     // 在第一个渠道读取期间取消
     setTimeout(() => { controller.abort() }, 20)
     let threw = false
@@ -2782,14 +2782,14 @@ describe('★★ ensureCatalog / refreshCatalog 必须接收 signal（真实请�
       accountPool: pool, expiryProbe: async () => 100,
     })
     const controller = new AbortController()
-    const pending = adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash', controller.signal)
+    const pending = adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash', controller.signal)
     // ⚠️ 在读取**进行中**取消 ⇒ 读取跑完后 `throwIfAborted` 生效、中止逃逸，
     //    且**不得**把截断目录写进缓存。
     setTimeout(() => { controller.abort() }, 20)
     await pending.catch(() => undefined)
     const before = reads.length
     // 再调一次（不取消）⇒ 必须重新读目录（而非用被中止的截断结果）
-    await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     expect(reads.length, '中止后必须重新读目录（catalogAt 不得被写）').toBeGreaterThan(before)
   })
 })
@@ -2852,7 +2852,7 @@ describe('★★ 收到 block-end 后失败 ⇒ 不得切换（由 `emitted` 拦
       ],
       [{ type: 'block-start', index: 0, blockType: 'tool-call', id: 'c1', name: 'read_file' }],
     )
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     await expect((async () => {
       for await (const _ of call.stream({ messages: [] } as never)) { /* drain */ }
     })()).rejects.toThrow()
@@ -2920,12 +2920,12 @@ describe('★★ 上下文窗口：候选集的**最大值**（真实缺陷：�
     //    （`coldModelInfo`，窗口是 `AGGREGATE_COLD_CONTEXT_WINDOW`）⇒ 冷帧下本组
     //    用例测的会是「兜底常量」而不是「候选集取大」，全部失去判别力。
     await warmCatalog(adapter)
-    const info = await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const info = await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-flash')
     expect(info.context?.contextWindow).toBe(1_000_000)
     // 对照：候选确实有三条（否则上面那条断言可能只是「只有一个候选」的巧合）。
     const candidates = (adapter as unknown as {
       catalog: Array<{ key: string; candidates: unknown[] }>
-    }).catalog.find((m) => m.key === 'deepseek-v4-1-flash')!.candidates
+    }).catalog.find((m) => m.key === 'deepseek-flash')!.candidates
     expect(candidates).toHaveLength(3)
   })
 
@@ -2941,7 +2941,7 @@ describe('★★ 上下文窗口：候选集的**最大值**（真实缺陷：�
     ), { accountPool: makePool() })
 
     await warmCatalog(adapter)
-    const info = await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const info = await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-flash')
     expect(info.context?.contextWindow).toBe(200_000)
     // 必须是**正整数**（DSH 的 `normalizeModelInfo` 逐字校验，非法即 INVALID_MODEL_CONTEXT）。
     expect(Number.isInteger(info.context!.contextWindow)).toBe(true)
@@ -3034,7 +3034,7 @@ describe('★★ 上下文窗口：候选集的**最大值**（真实缺陷：�
 
     await warmCatalog(adapter)
     // ① 只有 buddy（200K）⇒ 声明 200K。
-    expect((await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')).context?.contextWindow)
+    expect((await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-flash')).context?.contextWindow)
       .toBe(200_000)
 
     // ② 用户新登录 codearts（1M）⇒ 强制重推目录（`force = true`，与面板刷新同路径）。
@@ -3043,7 +3043,7 @@ describe('★★ 上下文窗口：候选集的**最大值**（真实缺陷：�
     await adapter.refreshCatalog(true)
 
     // ③ 窗口必须跟着变成 1M（缓存失效的判据）。
-    expect((await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')).context?.contextWindow)
+    expect((await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-flash')).context?.contextWindow)
       .toBe(1_000_000)
   })
 
@@ -3074,14 +3074,14 @@ describe('★★ 上下文窗口：候选集的**最大值**（真实缺陷：�
 
     await warmCatalog(adapter)
     // ① 抖动期间 ⇒ 兜底值。
-    expect((await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')).context?.contextWindow)
+    expect((await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-flash')).context?.contextWindow)
       .toBe(200_000)
 
     // ② 上游恢复，但**还没到**退化 TTL ⇒ 仍复用退化判决（这一条正是修复的收益：
     //    不必每一轮都去重试那个坏候选）。
     fail = false
     const before = calls
-    expect((await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')).context?.contextWindow)
+    expect((await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-flash')).context?.contextWindow)
       .toBe(200_000)
     expect(calls, '退化判决有效期内不得重新解析候选').toBe(before)
 
@@ -3089,7 +3089,7 @@ describe('★★ 上下文窗口：候选集的**最大值**（真实缺陷：�
     //    ⚠️ 这里**不能**靠 `refreshCatalog` 清缓存（那会掩盖缺陷）——
     //    必须证明「同一份目录下，TTL 一过就能拿到真值」。
     fakeNow += 30_001
-    expect((await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')).context?.contextWindow)
+    expect((await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-flash')).context?.contextWindow)
       .toBe(1_000_000)
   })
 
@@ -3127,18 +3127,18 @@ describe('★★ 上下文窗口：候选集的**最大值**（真实缺陷：�
 
     await warmCatalog(adapter)
     // ① codearts 抖动 ⇒ 用可用候选里的最大值（buddy 的 1M），不是兜底的 200K。
-    expect((await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')).context?.contextWindow)
+    expect((await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-flash')).context?.contextWindow)
       .toBe(1_000_000)
 
     // ② codearts 恢复，但退化 TTL 未到 ⇒ 仍是 1M（退化判决有效期内不重试）。
     codeartsFails = false
-    expect((await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')).context?.contextWindow)
+    expect((await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-flash')).context?.contextWindow)
       .toBe(1_000_000)
 
     // ③ 推过退化 TTL ⇒ 必须重试并采信 codearts 更大的窗口。
     fakeNow += 30_001
     const before = calls
-    expect((await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')).context?.contextWindow)
+    expect((await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-flash')).context?.contextWindow)
       .toBe(2_000_000)
     expect(calls, '必须重新解析候选，而不是复用「失败时算出的」结果').toBeGreaterThan(before)
   })
@@ -3171,7 +3171,7 @@ describe('★★ 上下文窗口：候选集的**最大值**（真实缺陷：�
 
     await warmCatalog(adapter)
     const startedAt = Date.now()
-    const info = await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const info = await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-flash')
     const elapsed = Date.now() - startedAt
 
     expect(info.context?.contextWindow).toBe(1_000_000)
@@ -3225,7 +3225,7 @@ describe('★★ 上下文窗口：候选集的**最大值**（真实缺陷：�
     internal.capabilityCache.clear()
     peak = 0
     const startedAt = Date.now()
-    const targets = await internal.candidatesFor('deepseek-v4-1-flash')
+    const targets = await internal.candidatesFor('deepseek-flash')
     const elapsed = Date.now() - startedAt
 
     expect(targets.length, '必须有候选，否则本用例是同义反复').toBeGreaterThan(1)
@@ -3263,7 +3263,7 @@ describe('★★ 上下文窗口：候选集的**最大值**（真实缺陷：�
 
     await warmCatalog(adapter)
     const startedAt = Date.now()
-    const info = await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const info = await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-flash')
     const elapsed = Date.now() - startedAt
 
     // ① 预算内结束（不是无限等待）。
@@ -3423,19 +3423,19 @@ describe('★★ 上下文窗口：候选集的**最大值**（真实缺陷：�
     })
 
     await warmCatalog(adapter)
-    expect((await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')).context?.contextWindow)
+    expect((await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-flash')).context?.contextWindow)
       .toBe(1_000_000)
     const afterFirst = badCalls
     expect(afterFirst, '第一次必须真的问过那个坏候选').toBeGreaterThan(0)
 
     // ② 直接问那个坏候选（绕开窗口缓存，只测失败短缓存本身）。
-    expect((await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')).context?.contextWindow)
+    expect((await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-flash')).context?.contextWindow)
       .toBe(1_000_000)
     expect(badCalls, 'TTL 内的重复询问不得再打那个坏候选').toBe(afterFirst)
 
     // ③ 推过失败 TTL ⇒ 必须重新尝试（上游恢复后要能纠正）。
     fakeNow += 30_001
-    await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-flash')
     expect(badCalls, '失败 TTL 到期后必须重新解析').toBeGreaterThan(afterFirst)
   })
 
@@ -3499,7 +3499,7 @@ describe('★★ 上下文窗口：候选集的**最大值**（真实缺陷：�
       })
       await warmCatalog(adapter)
 
-      await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+      await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
       const afterFirst = state.badCalls
       expect(afterFirst, '第一次必须真的问过那个坏候选').toBeGreaterThan(0)
 
@@ -3507,13 +3507,13 @@ describe('★★ 上下文窗口：候选集的**最大值**（真实缺陷：�
       // 但重建时**不得**再打那个坏候选。
       adapter.clearChoiceCache()
       state.fakeNow += 5_000
-      await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+      await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
       expect(state.badCalls, '失败短缓存 TTL 内不得再打那个坏候选').toBe(afterFirst)
 
       // 推过失败短缓存 ⇒ 必须重试（上游恢复后要能纠正）。
       adapter.clearChoiceCache()
       state.fakeNow += 30_001
-      await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+      await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
       expect(state.badCalls, '失败短缓存到期后必须重新解析').toBeGreaterThan(afterFirst)
     })
 
@@ -3531,18 +3531,18 @@ describe('★★ 上下文窗口：候选集的**最大值**（真实缺陷：�
       })
       await warmCatalog(adapter)
 
-      expect((await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')).context?.contextWindow)
+      expect((await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-flash')).context?.contextWindow)
         .toBe(1_000_000)
       const afterFirst = state.badCalls
 
       // 失败短缓存已禁用 ⇒ 唯一能拦住重复解析的就是退化记忆化。
       state.fakeNow += 10_000
-      await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+      await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-flash')
       expect(state.badCalls, '退化记忆化必须拦住重复解析（失败短缓存已关）').toBe(afterFirst)
 
       // 推过退化 TTL ⇒ 必须重试并采信真值（上游恢复后要能纠正）。
       state.fakeNow += 30_001
-      await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+      await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-flash')
       expect(state.badCalls, '退化 TTL 到期后必须重新解析').toBeGreaterThan(afterFirst)
     })
 
@@ -3582,18 +3582,18 @@ describe('★★ 上下文窗口：候选集的**最大值**（真实缺陷：�
       await warmCatalog(adapter)
 
       // ① 坏着问一次 ⇒ 失败记录落盘。
-      await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+      await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-flash')
       const afterBroken = badCalls
       expect(afterBroken).toBeGreaterThan(0)
 
       // ② 上游恢复。**不推进时间** ⇒ 仍在失败短缓存 TTL 内，不得重复打。
       broken = false
-      await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+      await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-flash')
       expect(badCalls, 'TTL 内不该再问（失败记录生效）').toBe(afterBroken)
 
       // ③ 推过失败 TTL ⇒ 恢复后必须拿到 autoclaw 更大的窗口（2M）。
       fakeNow += 30_001
-      expect((await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')).context?.contextWindow)
+      expect((await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-flash')).context?.contextWindow)
         .toBe(2_000_000)
     })
   })
@@ -3664,7 +3664,7 @@ describe('★★ 上下文窗口：候选集的**最大值**（真实缺陷：�
       await adapter.refreshCatalog()
       // ⚠️ 断言「整轮成功 + 窗口取健康候选的 1M」：若抛错，vitest 会把
       //    `AbortError` 的原话打出来，红因一眼可辨。
-      const info = await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+      const info = await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-flash')
       expect(info.context?.contextWindow, '坏候选必须被放弃等待，而不是把整轮带崩').toBe(1_000_000)
       // ⚠️ 反证预算真的到期了（否则本用例可能只是「buddy 先返回」的巧合绿）。
       expect(state.badAborted, '预算必须真的 abort 了那个坏候选').toBe(true)
@@ -3674,7 +3674,7 @@ describe('★★ 上下文窗口：候选集的**最大值**（真实缺陷：�
       const { state, ctx } = makeRaceWorld('microtask')
       const adapter = new AggregateAdapter(ctx, { accountPool: makePool(), capabilityTimeoutMs: 30 })
       await adapter.refreshCatalog()
-      const info = await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+      const info = await adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-flash')
       expect(info.context?.contextWindow).toBe(1_000_000)
       expect(state.badAborted).toBe(true)
     })
@@ -3695,7 +3695,7 @@ describe('★★ 上下文窗口：候选集的**最大值**（真实缺陷：�
       await adapter.refreshCatalog()
       const controller = new AbortController()
       controller.abort()
-      await expect(adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash', controller.signal))
+      await expect(adapter.resolveModel(AGGREGATE_PROVIDER, 'deepseek-flash', controller.signal))
         .rejects.toThrow(/abort/i)
     })
   })
@@ -3802,9 +3802,9 @@ describe('★★ 门控建池、NEVER 兜底与手工位次', () => {
     //    本用例才是抓「门控 + NEVER 兜底」的那一条：放行后 `raccoon` 的探针
     //    **返回 UNUSABLE**，若没有 NEVER 兜底它就会被剔除、请求永不发往它。
     const { adapter, probed, sent } = makeWorld({
-      allowed: () => ({ 'deepseek-v4-1-flash': { raccoon: { 'deepseek-v4.1-flash': true } } }),
+      allowed: () => ({ 'deepseek-flash': { raccoon: { 'deepseek-v4.1-flash': true } } }),
     })
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     await drain(call as never)
     // ⚠️ 关键断言：探针**没有被 raccoon 调用**（未接入渠道不探测）—— 它的 `expiry` 直接是 NEVER。
     expect(probed, '★ 未接入渠道不得被探针折算（否则会被 UNUSABLE 剔除）').toEqual(['buddy'])
@@ -3842,9 +3842,9 @@ describe('★★ 门控建池、NEVER 兜底与手工位次', () => {
     const adapter = new AggregateAdapter(ctx, {
       accountPool: pool,
       expiryProbe: async (provider: string) => (provider === 'raccoon' ? -1 : 100),
-      allowed: () => ({ 'deepseek-v4-1-flash': { raccoon: { 'deepseek-v4.1-flash': true } } }),
+      allowed: () => ({ 'deepseek-flash': { raccoon: { 'deepseek-v4.1-flash': true } } }),
     })
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     await drain(call as never)
     expect(sent, '★ buddy 失败后必须回落到手工打开的 raccoon').toEqual(['buddy', 'raccoon'])
   })
@@ -3882,9 +3882,9 @@ describe('★★ 门控建池、NEVER 兜底与手工位次', () => {
 
   it('★ 已接入渠道照旧走探针（NEVER 兜底不得顺手把它们也跳过）', async () => {
     const { adapter, probed } = makeWorld({
-      allowed: () => ({ 'deepseek-v4-1-flash': { raccoon: { 'deepseek-v4.1-flash': true } } }),
+      allowed: () => ({ 'deepseek-flash': { raccoon: { 'deepseek-v4.1-flash': true } } }),
     })
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
     await drain(call as never)
     expect(probed, 'buddy（已接入）必须仍被探针折算').toContain('buddy')
   })
@@ -3909,7 +3909,7 @@ describe('★★ 门控建池、NEVER 兜底与手工位次', () => {
       accountPool: pool,
       expiryProbe: async () => { throw abort },
     })
-    await expect(adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash'))
+    await expect(adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash'))
       .rejects.toThrow(/aborted/)
   })
 
@@ -3919,10 +3919,10 @@ describe('★★ 门控建池、NEVER 兜底与手工位次', () => {
         orderMode: () => 'manual',
         // buddy 临期 100（更早），raccoon 未接入 ⇒ NEVER。手工序把 raccoon 排第一
         // ⇒ **必须先发 raccoon**，否则「拖动排序」被临期值静默覆盖。
-        order: () => ({ 'deepseek-v4-1-flash': ['raccoon\u0000deepseek-v4.1-flash', 'buddy\u0000deepseek-v4.1-flash'] }),
-        allowed: () => ({ 'deepseek-v4-1-flash': { raccoon: { 'deepseek-v4.1-flash': true } } }),
+        order: () => ({ 'deepseek-flash': ['raccoon\u0000deepseek-v4.1-flash', 'buddy\u0000deepseek-v4.1-flash'] }),
+        allowed: () => ({ 'deepseek-flash': { raccoon: { 'deepseek-v4.1-flash': true } } }),
       })
-      const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+      const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
       await drain(call as never)
       expect(sent, '★ 手工位次必须严格优先（不被临期覆盖）').toEqual(['raccoon/deepseek-v4.1-flash'])
     })
@@ -3931,9 +3931,9 @@ describe('★★ 门控建池、NEVER 兜底与手工位次', () => {
       const { adapter, sent } = makeWorld({
         orderMode: () => 'manual',
         order: () => ({}),
-        allowed: () => ({ 'deepseek-v4-1-flash': { raccoon: { 'deepseek-v4.1-flash': true } } }),
+        allowed: () => ({ 'deepseek-flash': { raccoon: { 'deepseek-v4.1-flash': true } } }),
       })
-      const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+      const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
       await drain(call as never)
       expect(sent, '没有顺序 ⇒ 按临期（buddy 100 先）').toEqual(['buddy/deepseek-v4.1-flash'])
     })
@@ -3941,10 +3941,10 @@ describe('★★ 门控建池、NEVER 兜底与手工位次', () => {
     it('★ mode=expiry ⇒ 忽略顺序表（即便有内容）', async () => {
       const { adapter, sent } = makeWorld({
         orderMode: () => 'expiry',
-        order: () => ({ 'deepseek-v4-1-flash': ['raccoon\u0000deepseek-v4.1-flash', 'buddy\u0000deepseek-v4.1-flash'] }),
-        allowed: () => ({ 'deepseek-v4-1-flash': { raccoon: { 'deepseek-v4.1-flash': true } } }),
+        order: () => ({ 'deepseek-flash': ['raccoon\u0000deepseek-v4.1-flash', 'buddy\u0000deepseek-v4.1-flash'] }),
+        allowed: () => ({ 'deepseek-flash': { raccoon: { 'deepseek-v4.1-flash': true } } }),
       })
-      const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+      const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
       await drain(call as never)
       expect(sent, '临期模式下顺序表被忽略').toEqual(['buddy/deepseek-v4.1-flash'])
     })
@@ -3953,7 +3953,7 @@ describe('★★ 门控建池、NEVER 兜底与手工位次', () => {
       const { adapter, sent } = makeWorld({
         orderMode: () => 'manual',
         order: () => ({ auto: ['raccoon\u0000deepseek-v4.1-flash'] }),
-        allowed: () => ({ 'deepseek-v4-1-flash': { raccoon: { 'deepseek-v4.1-flash': true } } }),
+        allowed: () => ({ 'deepseek-flash': { raccoon: { 'deepseek-v4.1-flash': true } } }),
       })
       const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'auto')
       await drain(call as never)
@@ -3967,10 +3967,10 @@ describe('★★ 门控建池、NEVER 兜底与手工位次', () => {
       //    匹配不到 ⇒ `manualRankOf` 返回 `undefined` ⇒ 视为「未排过」。
       const { adapter, sent } = makeWorld({
         orderMode: () => 'manual',
-        order: () => ({ 'deepseek-v4-1-flash': ['raccoon\u0000drifted-away'] }),
-        allowed: () => ({ 'deepseek-v4-1-flash': { raccoon: { 'deepseek-v4.1-flash': true } } }),
+        order: () => ({ 'deepseek-flash': ['raccoon\u0000drifted-away'] }),
+        allowed: () => ({ 'deepseek-flash': { raccoon: { 'deepseek-v4.1-flash': true } } }),
       })
-      const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+      const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
       await drain(call as never)
       // 两条候选**都未排过**（漂移键匹配不到）⇒ 按临期：buddy 100 先于 raccoon 的 NEVER。
       expect(sent, '漂移键不得报错；全都未排过 ⇒ 落临期序').toEqual(['buddy/deepseek-v4.1-flash'])
@@ -3981,10 +3981,10 @@ describe('★★ 门控建池、NEVER 兜底与手工位次', () => {
       //   （两者都给 buddy 先发）。
       const { adapter, sent } = makeWorld({
         orderMode: () => 'manual',
-        order: () => ({ 'deepseek-v4-1-flash': ['raccoon\u0000deepseek-v4.1-flash'] }),
-        allowed: () => ({ 'deepseek-v4-1-flash': { raccoon: { 'deepseek-v4.1-flash': true } } }),
+        order: () => ({ 'deepseek-flash': ['raccoon\u0000deepseek-v4.1-flash'] }),
+        allowed: () => ({ 'deepseek-flash': { raccoon: { 'deepseek-v4.1-flash': true } } }),
       })
-      const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+      const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
       await drain(call as never)
       expect(sent, '★ 正确键 ⇒ 手工序把 raccoon 提到 buddy 之前').toEqual(['raccoon/deepseek-v4.1-flash'])
     })
@@ -3994,10 +3994,10 @@ describe('★★ 门控建池、NEVER 兜底与手工位次', () => {
       // 但按 Q3=A 的语义它必须**排在被排过的之后**，而不是按临期插到前面。
       const { adapter, sent } = makeWorld({
         orderMode: () => 'manual',
-        order: () => ({ 'deepseek-v4-1-flash': ['raccoon\u0000deepseek-v4.1-flash'] }),
-        allowed: () => ({ 'deepseek-v4-1-flash': { raccoon: { 'deepseek-v4.1-flash': true } } }),
+        order: () => ({ 'deepseek-flash': ['raccoon\u0000deepseek-v4.1-flash'] }),
+        allowed: () => ({ 'deepseek-flash': { raccoon: { 'deepseek-v4.1-flash': true } } }),
       })
-      const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+      const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
       await drain(call as never)
       expect(sent, '已排过的严格优先（即便它临期最晚）').toEqual(['raccoon/deepseek-v4.1-flash'])
     })
@@ -4049,7 +4049,7 @@ describe('★★ 门控建池、NEVER 兜底与手工位次', () => {
         orderMode: () => state.mode,
       })
       const run = async () => {
-        const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+        const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
         await drain(call as never)
       }
       await run()
@@ -4082,7 +4082,7 @@ describe('★★ 门控建池、NEVER 兜底与手工位次', () => {
 
     it('★ 顺序表变化 ⇒ 指纹变 ⇒ 重新探测（否则拖了排序 60 秒内不生效）', async () => {
       const { probes, afterFirst } = await probeCounter((s) => {
-        s.order = { 'deepseek-v4-1-flash': ['buddy\u0000deepseek-v4.1-flash'] }
+        s.order = { 'deepseek-flash': ['buddy\u0000deepseek-v4.1-flash'] }
       })
       expect(probes, '★ 顺序表是第 3 项').toBeGreaterThan(afterFirst)
     })
@@ -4098,10 +4098,10 @@ describe('★★ 门控建池、NEVER 兜底与手工位次', () => {
       // ⇒ 判据必须用**长度相同、内容不同**的两张表。
       const { probes, afterFirst } = await probeCounter((s) => {
         // 先给一份「两个候选」的顺序表…
-        s.order = { 'deepseek-v4-1-flash': ['buddy\u0000a', 'zcode\u0000b'] }
+        s.order = { 'deepseek-flash': ['buddy\u0000a', 'zcode\u0000b'] }
       }, {
         // …但第一轮用的也是**两个**（只是内容不同）⇒ 长度相同、内容不同。
-        order: { 'deepseek-v4-1-flash': ['zcode\u0000b', 'buddy\u0000a'] },
+        order: { 'deepseek-flash': ['zcode\u0000b', 'buddy\u0000a'] },
       })
       expect(probes, '★ 长度相同但内容/次序不同的顺序表必须让指纹变化').toBeGreaterThan(afterFirst)
     })
@@ -4186,18 +4186,18 @@ describe('aggregate：目录加载不得同步折算余额（实测 7 秒）', (
 
     // 落地点 ①：再次 listModels 能看到折算出来的虚拟模型（含倍率后缀）。
     const second = await adapter.listModels(AGGREGATE_PROVIDER)
-    expect(second.map((m) => m.id), '★ 后台补算完成后必须能被再次播报').toContain('deepseek-v4-1-flash')
+    expect(second.map((m) => m.id), '★ 后台补算完成后必须能被再次播报').toContain('deepseek-flash')
     expect(
-      second.find((m) => m.id === 'deepseek-v4-1-flash')?.name,
+      second.find((m) => m.id === 'deepseek-flash')?.name,
       '★ 且是**折算过**的那一份（倍率来自真实目录）',
-    ).toBe('DeepSeek V4.1 Flash · 最低 x0.15')
+    ).toBe('DeepSeek Flash · 最低 x0.15')
 
     // 落地点 ②：同步视图（设置页开关清单的来源）也立刻可见。
-    expect(adapter.listAllModels().map((m) => m.id)).toContain('deepseek-v4-1-flash')
+    expect(adapter.listAllModels().map((m) => m.id)).toContain('deepseek-flash')
 
     // 落地点 ③：面板路径的候选表也已建好（证明补算产出的是**完整目录**）。
     const described = await adapter.describeCatalog()
-    expect(described.models.map((m) => m.canonicalId)).toContain('deepseek-v4-1-flash')
+    expect(described.models.map((m) => m.canonicalId)).toContain('deepseek-flash')
   })
 
   /**
@@ -4303,7 +4303,7 @@ describe('aggregate：目录加载不得同步折算余额（实测 7 秒）', (
     await new Promise((resolve) => { setTimeout(resolve, 0) })
     expect(reads, '★ 冷帧必须真的起了一轮后台目录读取').toBeGreaterThan(0)
     // 且那一轮真的落地了（否则「起了」也可以是空转）。
-    expect(adapter.listAllModels().map((m) => m.id)).toContain('deepseek-v4-1-flash')
+    expect(adapter.listAllModels().map((m) => m.id)).toContain('deepseek-flash')
   })
 
   it('★★ 目录为空时 resolveModel **不得** await 目录（反向验证的靶点）', async () => {
@@ -4398,7 +4398,7 @@ describe('aggregate：目录加载不得同步折算余额（实测 7 秒）', (
     // 先落地一份真实目录。
     await adapter.refreshCatalog()
     const before = adapter.listAllModels().map((m) => m.id)
-    expect(before).toContain('deepseek-v4-1-flash')
+    expect(before).toContain('deepseek-flash')
 
     // 上游开始永挂 ⇒ 后台那一轮到期被放弃。
     hang = true
@@ -4408,7 +4408,7 @@ describe('aggregate：目录加载不得同步折算余额（实测 7 秒）', (
     expect(
       adapter.listAllModels().map((m) => m.id),
       '★ 放弃等待不得清空旧目录（否则上游抖一下 = 用户所有模型消失）',
-    ).toContain('deepseek-v4-1-flash')
+    ).toContain('deepseek-flash')
   })
 
   /**
@@ -4440,7 +4440,7 @@ describe('aggregate：目录加载不得同步折算余额（实测 7 秒）', (
     // 让注册时那次预热跑完（fire-and-forget）。
     for (let i = 0; i < 10; i += 1) await Promise.resolve()
     await new Promise((resolve) => { setTimeout(resolve, 0) })
-    expect(adapter.listAllModels().map((m) => m.id)).toContain('deepseek-v4-1-flash')
+    expect(adapter.listAllModels().map((m) => m.id)).toContain('deepseek-flash')
     expect(
       emitted,
       '★★ 目录落地后必须广播（与其余 12 家适配器的 onCatalogLoaded 同一口径）',

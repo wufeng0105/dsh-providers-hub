@@ -78,12 +78,11 @@ describe('统一键：streamThrough 恒顶格', () => {
   it('两档 off/on ⇒ 注入 on', async () => {
     const seen: Array<{ provider: string; effort: string | undefined }> = []
     const adapter = new AggregateAdapter(makeCtx({
-      modelId: 'deepseek-v4-flash', modelName: 'DeepSeek V4 Flash',
+      modelId: 'deepseek-v4-flash', modelName: 'DeepSeek Flash',
       efforts: [{ id: 'off' }, { id: 'on' }], seen,
     }), { accountPool: makePool(), expiryProbe: async () => 100 })
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-flash')
-    for await (const _ of call.stream({ ...USER_MSG, reasoningEffort: 'off' } as never)) { /* drain */ }
-    expect(seen).toEqual([{ provider: 'buddy', effort: 'on' }])
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-flash')
+    for await (const _ of call.stream({ ...USER_MSG, reasoningEffort: 'off' } as never)) { /* drain */ }    expect(seen).toEqual([{ provider: 'buddy', effort: 'on' }])
   })
 
   it('候选无档位声明 ⇒ 不下发 reasoningEffort（不编造）', async () => {

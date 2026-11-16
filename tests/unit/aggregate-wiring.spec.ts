@@ -221,7 +221,7 @@ describe('★★ 聚合关闭后不得被动态目录长大重新打开', () => 
     // ① 初始目录只含 buddy
     await adapter.listModels('aggregate')
     const firstIds = adapter.listAllModels().map((m) => m.id)
-    expect(firstIds).toEqual(['auto', 'deepseek-v4-1-flash'])
+    expect(firstIds).toEqual(['auto', 'deepseek-flash'])
     // ② 模拟 master 的「一键关闭」：写入当时的全量快照
     await pool.setModelsDisabled('aggregate', firstIds)
     // ③ 登录新渠道 ⇒ 目录长大（force 重推，模拟 TTL 过期后的下一次推导）
