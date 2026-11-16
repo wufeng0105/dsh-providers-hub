@@ -5,6 +5,7 @@ import {
   rawListModelsFor,
   rememberRawListModels,
   setHiddenProviders,
+  syncHiddenProviders,
   withSelectorVisibility,
 } from '../../src/selector-visibility.js'
 import { sanitizeHiddenProviders } from '../../src/jet-hub-store.js'
@@ -84,6 +85,54 @@ describe('选择器可见性：隐藏 = 分组消失，但聚合仍读得到', (
     const snapshot = hiddenProvidersSnapshot()
     snapshot.push('c')
     expect(hiddenProvidersSnapshot()).toEqual(['a', 'b'])
+    setHiddenProviders([])
+  })
+})
+
+describe('★ 真实缺陷守卫（2026-11-16 用户报障「都勾上了但没成功」）', () => {
+  /**
+   * 两个独立的失效点，各自都能让「勾了没用」且零报错：
+   * ① 包装时按「当前隐藏集」做静态短路 ⇒ 注册后又勾选永远不生效；
+   * ② 装配期没把已落盘的集合灌进单例 ⇒ 重启后已勾选的也不生效。
+   * 下面的用例分别钉住它们。
+   */
+  it('★① 包好之后再勾选，必须**立刻**生效（不得有注册期短路）', async () => {
+    setHiddenProviders([])
+    const adapter = makeAdapter({ buddy: [{ id: 'm' }] })
+    // 关键：**先包装**（此刻没有任何渠道被隐藏）…
+    const wrapped = withSelectorVisibility(['buddy'], adapter) as {
+      listModels: (p: string) => Promise<readonly { id: string }[]>
+    }
+    expect((await wrapped.listModels('buddy')).length).toBe(1)
+    // …**再**勾选（模拟用户在面板里操作）
+    setHiddenProviders(['buddy'])
+    expect(await wrapped.listModels('buddy'), '包装必须每次现查隐藏集').toEqual([])
+    setHiddenProviders([])
+  })
+
+  it('★② 已落盘的集合必须能灌进单例（装配期同步），且灌完立即生效', async () => {
+    setHiddenProviders([])
+    const adapter = makeAdapter({ qoder: [{ id: 'dfmodel' }] })
+    const wrapped = withSelectorVisibility(['qoder'], adapter) as {
+      listModels: (p: string) => Promise<readonly { id: string }[]>
+    }
+    expect((await wrapped.listModels('qoder')).length).toBe(1)
+    // 模拟 `index.ts` 装配期那一次同步（读盘得到的集合）
+    syncHiddenProviders(['qoder', 'buddy'])
+    expect(isProviderHidden('qoder')).toBe(true)
+    expect(await wrapped.listModels('qoder')).toEqual([])
+    setHiddenProviders([])
+  })
+
+  it('★ 聚合读目录不受隐藏影响（装配期同步后仍能拿到候选）', async () => {
+    setHiddenProviders(['buddy'])
+    const adapter = makeAdapter({ buddy: [{ id: 'm' }] })
+    rememberRawListModels(['buddy'], adapter)
+    const wrapped = withSelectorVisibility(['buddy'], adapter) as {
+      listModels: (p: string) => Promise<readonly { id: string }[]>
+    }
+    expect(await wrapped.listModels('buddy'), '宿主侧隐藏').toEqual([])
+    expect((await rawListModelsFor('buddy')!('buddy')), '聚合侧仍可见').toHaveLength(1)
     setHiddenProviders([])
   })
 })

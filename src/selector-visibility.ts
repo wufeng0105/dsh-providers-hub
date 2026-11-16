@@ -45,9 +45,31 @@ export function hiddenProvidersSnapshot(): string[] {
   return [...hiddenProviders]
 }
 
-/** 该 provider 是否被用户要求「在选择器里隐藏」。 */
+/**
+ * 该 provider 是否被用户要求「在选择器里隐藏」。
+ *
+ * ⚠️ 判据是**运行时集合**（面板随时可改），不是注册期快照 —— 理由见
+ * {@link withSelectorVisibility} 的注释。
+ */
 export function isProviderHidden(provider: string): boolean {
   return hiddenProviders.has(provider)
+}
+
+/**
+ * 主动把「已落盘的隐藏集合」灌进本模块（**注册路径必须在包装前调用一次**）。
+ *
+ * ## ⚠️ 为什么必须有它（真实缺陷，2026-11-16 用户报障「勾了没成功」）
+ *
+ * 隐藏集合住在 `AccountPool`，而它是**惰性载入**的（`ensureLoaded()` 在首次访问
+ * 某个 getter 时才读盘）。插件的注册流程发生在装配阶段，那时通常**没有任何代码
+ * 碰过池** ⇒ 本模块的集合还是空的 ⇒ 重启后第一次打开选择器时，
+ * 「隐藏」对已落盘的勾选**完全不生效**（用户必须先点一次面板让池载入才好）。
+ * ⇒ 让调用方在注册前显式 `syncHiddenProvidersFrom(pool.listHiddenProviders())`。
+ *
+ * ⚠️ 本函数本身不读盘（保持本模块零 IO）：取集合是调用方的责任。
+ */
+export function syncHiddenProviders(providers: Iterable<string>): void {
+  setHiddenProviders(providers)
 }
 
 /**
@@ -74,16 +96,21 @@ export function rawListModelsFor(provider: string): ListModelsFn | undefined {
  * ⚠️ Proxy 失败不得阻断注册 —— 由调用方 try/catch 兜底（与既有几层包装同口径）。
  */
 export function withSelectorVisibility(providers: readonly string[], adapter: object): object {
-  // 该适配器服务的 provider 全在隐藏集里才需要真拦；否则原样返回，零开销。
-  const anyVisible = providers.some(
-    (provider) => provider === AGGREGATE_PROVIDER_ID || !hiddenProviders.has(provider),
-  )
-  if (anyVisible && providers.every((p) => !hiddenProviders.has(p))) return adapter
+  // ⚠️⚠️ **不得在这里按「当前隐藏集」做静态短路**（真实缺陷，2026-11-16 用户报障
+  //    「我所有的都已经勾选上了，但是没成功」）：
+  //    初版写的是 `if (全部可见) return adapter` —— 而注册发生在**插件加载时**，
+  //    那时用户在面板里的勾选要么还没发生、要么刚被 restart 读回得比注册晚
+  //    ⇒ 一旦注册那一刻「没有全员隐藏」，包装就被永久跳过，
+  //    之后无论用户怎么勾都**再也不会生效**（且零报错）。
+  //    ⇒ 隐藏集是**运行时可变的**，判据必须每次 `listModels` 现查（下面的 Proxy）。
+  //    代价是每层多一次 Proxy 转发（纳秒级、只影响一次目录读取），可忽略。
+  void providers
   return new Proxy(adapter, {
     get(target, prop, receiver) {
       if (prop !== 'listModels') return Reflect.get(target, prop, receiver)
       return async (provider: string): Promise<readonly VisibilityCatalogModel[]> => {
-        if (provider !== AGGREGATE_PROVIDER_ID && hiddenProviders.has(provider)) return []
+        // ⚠️ 聚合自身永不隐藏（它是用户唯一要保留的分组）。
+        if (provider !== AGGREGATE_PROVIDER_ID && isProviderHidden(provider)) return []
         const fn = (target as { listModels?: unknown }).listModels
         return typeof fn === 'function' ? (fn as ListModelsFn).call(target, provider) : []
       }

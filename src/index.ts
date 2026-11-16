@@ -267,6 +267,7 @@ import type { GeminiCredential } from './gemini.js'
 import { createGeminiSigStore } from './gemini-sigstore.js'
 import { OpencodeAdapter, registerOpencodeLlm } from './opencode-adapter.js'
 import { AUTO_PROVIDER, registerAutoLlm } from './auto-adapter.js'
+import { syncHiddenProviders } from './selector-visibility.js'
 import { AGGREGATE_PROVIDER, registerAggregateLlm } from './aggregate-adapter.js'
 // ⚠️ `createExpiryProbe` 从**底座**导入，不是从 `aggregate-adapter.js`
 //（它定义在 `aggregate-expiry.ts`，理由见该文件与 Task 7 的 Files 说明）。
@@ -1123,6 +1124,27 @@ export function apply(ctx: Context): void {
   )
   const service = new CodeArtsAuth(ctx)
   const pool = new AccountPool(ctx)
+
+  /**
+   * ⚠️⚠️ **把已落盘的「选择器隐藏」集合在注册任何适配器之前灌进包装层**
+   * （真实缺陷，2026-11-16 用户报障「我所有的都已经勾选上了，但是没成功」）。
+   *
+   * 隐藏集合住在 `AccountPool`，而池是**惰性载入**的（首次访问某个 getter 才读盘）。
+   * 各 `registerXxxLlm` 发生在装配阶段，那时通常没有任何代码碰过池 ⇒
+   * `selector-visibility.ts` 的集合还是空的 ⇒ 重启后「隐藏」对已落盘的勾选
+   * 完全不生效，且**零报错**（用户只能观察到「勾了没用」）。
+   *
+   * ⚠️ 这里显式读一次池（`listHiddenProviders()` 内部 `ensureLoaded()`）：
+   *    读盘失败会抛 —— 但那**不该阻断启动**（用户会看不到任何模型，
+   *    比「隐藏没生效」严重得多）⇒ 用 try/catch 降级成一条 warn。
+   */
+  try {
+    syncHiddenProviders(pool.listHiddenProviders())
+  } catch (error) {
+    ctx.logger?.warn?.(
+      `[jet-hub] 载入「选择器隐藏」集合失败（本次启动将显示全部渠道）：${String(error)}`,
+    )
+  }
 
   /**
    * **AutoClaw 存量账号去重自愈**（2026-10-19 用户三次报障后定稿）。
