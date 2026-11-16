@@ -237,7 +237,10 @@ const BUILTIN_MODEL_IDENTITIES: readonly ModelIdentityRule[] = Object.freeze([
   // ── Qwen ──
   // ⚠️ `qwen-?` 两种连接写法都收：不同渠道一个写 `qwen3.8-flash`、另一个写
   //    `qwen-3.8-flash`，归一后只差一个连字符（同一模型的两种写法）。
-  { key: 'qwen4-max', name: 'Qwen4-Max', match: { pattern: /^qwen-?4-max(-free)?$/ } },
+  // ⚠️ `qwen-?4-max` 后面要收 `-preview`：2026-11-17 用户报障选择器里
+  //    `Qwen4-Max` 与 `qwen4-max-preview` **并列两条**（同一个模型的预览版被拆出去）。
+  //    预览版是同一模型的不同阶段，归到同一键；显示名按用户要求取 `Qwen4`。
+  { key: 'qwen4-max', name: 'Qwen4', match: { pattern: /^qwen-?4-max(-preview)?(-free)?$/ } },
   { key: 'qwen3-8-flash', name: 'Qwen3.8-Flash', match: { pattern: /^qwen-?3-8-flash(-free)?$/ } },
   { key: 'qwen3-8-max', name: 'Qwen3.8-Max', match: { pattern: /^qwen-?3-8-max(-free)?$/ } },
   { key: 'qwen3-7-max', name: 'Qwen3.7-Max', match: { pattern: /^qwen-?3-7-max(-free)?$/ } },

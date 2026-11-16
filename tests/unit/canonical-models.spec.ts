@@ -718,6 +718,10 @@ describe('型号统一表（2026-11-16）：同档变体与机器代号收敛为
     ['minimax-m2.7', 'minimax-m2-7'],
     ['qwen4-max', 'qwen4-max'],
     ['qwen-4-max', 'qwen4-max'],
+    // 2026-11-17 用户报障：预览版被拆成第二条，必须归到同一键。
+    ['qwen4-max-preview', 'qwen4-max'],
+    ['Qwen4-Max-Preview', 'qwen4-max'],
+    ['qwen-4-max-preview', 'qwen4-max'],
     ['qwen-3.8-flash', 'qwen3-8-flash'],
     ['qwen3.8-flash', 'qwen3-8-flash'],
     ['qwen-3.8-max', 'qwen3-8-max'],
@@ -808,7 +812,7 @@ describe('型号统一表（2026-11-16）：同档变体与机器代号收敛为
   it('CANONICAL_NAMES 给统一键登记了展示名', () => {
     expect(canonicalDisplayName('deepseek-flash')).toBe('DeepSeek Flash')
     expect(canonicalDisplayName('minimax-m3-1-flash')).toBe('MiniMax-M3.1-Flash')
-    expect(canonicalDisplayName('qwen4-max')).toBe('Qwen4-Max')
+    expect(canonicalDisplayName('qwen4-max')).toBe('Qwen4')
     expect(canonicalDisplayName('glm-5-3')).toBe('GLM-5.3')
   })
 })
