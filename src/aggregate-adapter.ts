@@ -1686,6 +1686,10 @@ export class AggregateAdapter extends LlmAdapter {
    */
   private isAllDefaultsUnopened(model: VirtualModel): boolean {
     if (model.candidates.length === 0) return false
+    // ⚠️ 型号统一条目（2026-11-16）：default-rejected 已放宽进池（见 candidatesFor）⇒
+    //    它们**参与轮换**，故「全 default-rejected ⇒ 不播报」的判据对统一键不适用，恒 false。
+    //    非统一键口径不变（全 default-rejected 仍不播报，恢复入口在面板）。
+    if (isUnifiedKey(model.key)) return false
     const rejected = this.rejectedFor(model)
     return model.candidates.every((candidate) =>
       this.gateOf(model.key, candidate.provider, candidate.realId, rejected) === 'default-rejected')
@@ -2221,8 +2225,15 @@ export class AggregateAdapter extends LlmAdapter {
       if (virtual === undefined) return []
       // ⚠️ `rejectedFor`（含 D4 漂移降级）—— 这是**建池**路径，用户拒绝的候选必须真的不进池。
       const rejected = this.rejectedFor(virtual)
+      // ⚠️ 型号统一条目（2026-11-16）：default-rejected（未接入折算且未手工打开）**放宽进池**
+      //    （用户诉求「我放开的都进池」，黑名单已是唯一成员筛选）；显式拒绝仍剔除（开关必须有用）。
+      //    放宽的候选后续折算分支赋 NEVER（未接入渠道不探针）⇒ 天然排最后。
+      //    非统一键口径不变：default-rejected 仍剔（auto 与具名键的既有行为）。
+      const unified = isUnifiedKey(model)
       for (const candidate of virtual.candidates) {
-        if (this.gateOf(virtual.key, candidate.provider, candidate.realId, rejected) !== 'allowed') continue
+        const gate = this.gateOf(virtual.key, candidate.provider, candidate.realId, rejected)
+        if (gate === 'rejected') continue
+        if (gate === 'default-rejected' && !unified) continue
         pool.push({ provider: candidate.provider, realId: candidate.realId, expiry: NEVER, price: candidate.price })
       }
     }
@@ -2361,7 +2372,15 @@ export class AggregateAdapter extends LlmAdapter {
     //   `src/aggregate-catalog.ts` 的 `buildVirtualModels` 明文保留同渠道的重复候选；
     //   真正的原因是**候选数本来就不超过名额**（`limit = maxAttemptsFor(catalog)` 是
     //   「最长候选表的长度」）⇒ `slice` 一个都不截断，两条分支逐字节等价。
-    const picked = model === AGGREGATE_AUTO_MODEL ? pickDiversified(ranked, limit) : ranked.slice(0, limit)
+    // ⚠️ 型号统一条目（2026-11-16）：用 pickDiversified(ranked, ranked.length) ——
+    //    与 auto 同款分散（防同渠道一家吃满，qoder 排队故障的同型缓解），且**不截断尾部**
+    //    （名额 = 全池长度）。统一键候选数本就 ≥ limit（它自己是最长表），故分散是唯一行为差异。
+    //    非统一键保持 slice（候选数 ≤ limit，逐字节等价）；auto 保持 pickDiversified(ranked, limit)。
+    const picked = model === AGGREGATE_AUTO_MODEL
+      ? pickDiversified(ranked, limit)
+      : isUnifiedKey(model)
+        ? pickDiversified(ranked, ranked.length)
+        : ranked.slice(0, limit)
     const capabilities = await Promise.all(
       picked.map((candidate) => this.capabilityOf(candidate.provider, candidate.realId, signal)),
     )
