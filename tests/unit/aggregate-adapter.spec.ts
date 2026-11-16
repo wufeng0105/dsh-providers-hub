@@ -1665,8 +1665,11 @@ describe('★ 未接入临期折算的渠道：模型**仍然可见**（用户 2
     // ⚠️⚠️ **恢复路径没有丢**（这正是与「候选全被拒」的区别）：
     //    它**仍在聚合面板**里（`describeCatalog` 不受本过滤影响），
     //    用户在那里展开、逐条打开后它就回到选择器。
+    // ⚠️ 2026-11-16：本组用**非统一键** kimi-k3 承载 —— 型号统一条目（如 deepseek-v4-1-flash）
+    //    的 default-rejected 已放宽进池、恒播报（见 aggregate-unified-gate.spec.ts），
+    //    而「非统一键：全未打开不播报 / 打开后播报 / 主动全拒仍播报」这套既有口径不变。
     const adapter = new AggregateAdapter(
-      makeCtx({ cline: [{ id: 'cline-free/deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash' }] }),
+      makeCtx({ cline: [{ id: 'cline-free/kimi-k3', name: 'Kimi K3' }] }),
       { accountPool: pool, expiryProbe: async () => 100 },
     )
     await warmCatalog(adapter)
@@ -1677,28 +1680,28 @@ describe('★ 未接入临期折算的渠道：模型**仍然可见**（用户 2
     //   （`provider.status` 的 `total` 取自它，藏起来会让「整个 provider 已关闭」的
     //   判据 `disabled === total` 抖动）。
     expect(adapter.listAllModels().map((m) => m.id), '★ 目录身份必须稳定')
-      .toEqual(['auto', 'deepseek-v4-1-flash'])
+      .toEqual(['auto', 'kimi-k3'])
     // ★ 且聚合面板必须仍列出它（那是唯一的打开入口）。
     const catalog = await adapter.describeCatalog()
     expect(catalog.models.map((m) => m.canonicalId), '★ 面板必须仍能看到（打开入口）')
-      .toContain('deepseek-v4-1-flash')
+      .toContain('kimi-k3')
   })
 
   it('★★ 打开任意一条未接入候选 ⇒ 该模型**回到**选择器（恢复路径可用）', async () => {
     // ⚠️ 这条与上一条构成**一对**：只测「没打开时不显示」会让「打开后也不显示」
     //    的缺陷全绿（那是本仓库反复出现的「只测一个方向」形态）。
     const adapter = new AggregateAdapter(
-      makeCtx({ cline: [{ id: 'cline-free/deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash' }] }),
+      makeCtx({ cline: [{ id: 'cline-free/kimi-k3', name: 'Kimi K3' }] }),
       {
         accountPool: pool,
         expiryProbe: async () => 100,
-        allowed: () => ({ 'deepseek-v4-1-flash': { cline: { 'cline-free/deepseek-v4.1-flash': true } } }),
+        allowed: () => ({ 'kimi-k3': { cline: { 'cline-free/kimi-k3': true } } }),
       },
     )
     await warmCatalog(adapter)
     const models = await adapter.listModels(AGGREGATE_PROVIDER)
     expect(models.map((m) => m.id), '★ 打开后必须回到选择器')
-      .toEqual(['auto', 'deepseek-v4-1-flash'])
+      .toEqual(['auto', 'kimi-k3'])
   })
 
   it('★★ 对照：**用户主动全部拒绝**的模型仍留在选择器里（成文不变式，不得被上一条误伤）', async () => {
@@ -1708,17 +1711,17 @@ describe('★ 未接入临期折算的渠道：模型**仍然可见**（用户 2
     //    模型留在选择器里 ⇒ 用户选中它拿到**如实**报错 ⇒ 回面板重新打开即恢复。
     //    若藏起来，用户连「我拒过这个模型」都看不到了。
     const adapter = new AggregateAdapter(
-      makeCtx({ buddy: [{ id: 'deepseek-v4.1-flash', name: 'Deepseek-V4.1-Flash' }] }),
+      makeCtx({ buddy: [{ id: 'kimi-k3', name: 'Kimi-K3' }] }),
       {
         accountPool: pool,
         expiryProbe: async () => 100,
-        rejections: () => ({ 'deepseek-v4-1-flash': { buddy: { 'deepseek-v4.1-flash': true } } }),
+        rejections: () => ({ 'kimi-k3': { buddy: { 'kimi-k3': true } } }),
       },
     )
     await warmCatalog(adapter)
     const models = await adapter.listModels(AGGREGATE_PROVIDER)
     expect(models.map((m) => m.id), '★ 主动全拒 ≠ 无临期全未打开：必须仍播报')
-      .toContain('deepseek-v4-1-flash')
+      .toContain('kimi-k3')
   })
 
   it('★★ 把某模型的候选**全部**拒绝 ⇒ 模型**仍在**目录里（锁住「全拒 ≠ 关闭模型」的成文不变式）', async () => {
@@ -3761,13 +3764,15 @@ describe('★★ 门控建池、NEVER 兜底与手工位次', () => {
     //    而那正是它该抓的 —— 但我第一版把它写成了「buddy 先成功所以探针只到 buddy」）。
     //    ⇒ 现在世界只有未接入渠道：门控缺失 ⇒ 它在池里、**甚至可能被发往**
     //    （探针返回 UNUSABLE 才会拦它，而那是另一道闸门、不是门控）。
+    // ⚠️ 2026-11-16：用**非统一键** kimi-k3 承载（统一键的 default-rejected 已放宽进池，
+    //    见 aggregate-unified-gate.spec.ts）；非统一键「未放行不进池、不探针」口径不变。
     const probed: string[] = []
     const sent: string[] = []
     const ctx = {
       logger: { warn: () => {}, info: () => {}, error: () => {} },
       llm: {
         listProviders: () => [{ id: 'raccoon' }],
-        listModels: async () => [{ id: 'sn-glm-5-3', name: 'GLM-5-3 · x0.75' }],
+        listModels: async () => [{ id: 'sn-kimi-k3', name: 'Kimi-K3 · x0.75' }],
         resolveModelInfo: async (provider: string, id: string) => ({ provider, id }),
         stream: (o: { provider: string }) => {
           sent.push(o.provider)
@@ -3785,7 +3790,7 @@ describe('★★ 门控建池、NEVER 兜底与手工位次', () => {
     })
     // ⚠️ 零候选 ⇒ `prepareCall` **直接抛**（它在建池后、返回 call 之前就查了候选数）
     //    —— 这就是未放行的**如实**结果：不静默成功，也不发往任何渠道。
-    await expect(adapter.prepareCall(AGGREGATE_PROVIDER, 'glm-5-3'))
+    await expect(adapter.prepareCall(AGGREGATE_PROVIDER, 'kimi-k3'))
       .rejects.toThrow(/没有任何可用候选/)
     expect(probed, '★ 未放行的未接入候选不得触发探针（门控在建池阶段）').toEqual([])
     expect(sent, '★ 更不得被发往').toEqual([])
@@ -3845,12 +3850,13 @@ describe('★★ 门控建池、NEVER 兜底与手工位次', () => {
   })
 
   it('★ 对照：**未放行**时 buddy 失败 ⇒ 不回落（raccoon 不在池里）', async () => {
+    // ⚠️ 2026-11-16：用非统一键 kimi-k3 承载（统一键已放宽，见 aggregate-unified-gate.spec.ts）。
     const sent: string[] = []
     const ctx = {
       logger: { warn: () => {}, info: () => {}, error: () => {} },
       llm: {
         listProviders: () => [{ id: 'buddy' }, { id: 'raccoon' }],
-        listModels: async () => [{ id: 'deepseek-v4.1-flash', name: 'M' }],
+        listModels: async () => [{ id: 'kimi-k3', name: 'M' }],
         resolveModelInfo: async (provider: string, id: string) => ({ provider, id }),
         stream: (o: { provider: string }) => {
           sent.push(o.provider)
@@ -3869,7 +3875,7 @@ describe('★★ 门控建池、NEVER 兜底与手工位次', () => {
       accountPool: pool,
       expiryProbe: async (provider: string) => (provider === 'raccoon' ? -1 : 100),
     })
-    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'deepseek-v4-1-flash')
+    const call = await adapter.prepareCall(AGGREGATE_PROVIDER, 'kimi-k3')
     await expect(drain(call as never)).rejects.toThrow()
     expect(sent, '未放行 ⇒ 只尝试 buddy，失败即失败（不得静默发往未放行的渠道）').toEqual(['buddy'])
   })
